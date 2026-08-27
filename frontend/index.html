@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RiskPred - AI Risk Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                <i data-lucide="shield-alert" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-xl tracking-tight text-white">RiskPred</h1>
+                <p class="text-xs text-slate-400">Razorpay Buildathon 2026 • AI Fraud Risk Manager</p>
+            </div>
+        </div>
+        <div id="api-status-badge" class="px-3 py-1 text-xs rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            System Online
+        </div>
+    </header>
+
+    <!-- Main Body -->
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        
+        <!-- Metrics Bar -->
+        <section class="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div class="bg-slate-800/50 border border-slate-700/50 p-5 rounded-xl">
+                <p class="text-slate-400 text-xs font-medium uppercase">Total Transactions</p>
+                <h3 id="metric-total" class="text-2xl font-bold mt-1 text-white">0</h3>
+            </div>
+            <div class="bg-slate-800/50 border border-slate-700/50 p-5 rounded-xl">
+                <p class="text-slate-400 text-xs font-medium uppercase">Avg Risk Score</p>
+                <h3 id="metric-avg-score" class="text-2xl font-bold mt-1 text-amber-400">0/100</h3>
+            </div>
+            <div class="bg-slate-800/50 border border-slate-700/50 p-5 rounded-xl">
+                <p class="text-slate-400 text-xs font-medium uppercase">Flagged Fraud</p>
+                <h3 id="metric-flagged" class="text-2xl font-bold mt-1 text-rose-400">0</h3>
+            </div>
+            <div class="bg-slate-800/50 border border-slate-700/50 p-5 rounded-xl">
+                <p class="text-slate-400 text-xs font-medium uppercase">Protected Exposure</p>
+                <h3 id="metric-amount" class="text-2xl font-bold mt-1 text-emerald-400">₹0</h3>
+            </div>
+        </section>
+
+        <!-- Test Simulation & Live Monitor -->
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Simulation Form -->
+            <div class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl space-y-4">
+                <h3 class="font-semibold text-slate-200 border-b border-slate-700 pb-3 flex items-center gap-2">
+                    <i data-lucide="send" class="w-4 h-4 text-indigo-400"></i> Evaluate Transaction
+                </h3>
+                <form id="txn-form" class="space-y-3 text-sm">
+                    <div>
+                        <label class="block text-slate-400 text-xs mb-1">Amount (₹)</label>
+                        <input type="number" id="form-amount" value="18500" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-slate-100 focus:outline-none focus:border-indigo-500">
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-400 text-xs mb-1">5m Velocity</label>
+                            <input type="number" id="form-velocity" value="5" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-slate-100">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 text-xs mb-1">Failed Attempts (24h)</label>
+                            <input type="number" id="form-failed" value="4" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-slate-100">
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between pt-1">
+                        <span class="text-xs text-slate-400">New Device Signal</span>
+                        <input type="checkbox" id="form-new-device" checked class="w-4 h-4 accent-indigo-600">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs text-slate-400">New Location Signal</span>
+                        <input type="checkbox" id="form-new-location" checked class="w-4 h-4 accent-indigo-600">
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 rounded transition">
+                        Run Risk Analysis
+                    </button>
+                </form>
+            </div>
+
+            <!-- Risk Evaluation Output -->
+            <div id="evaluation-card" class="bg-slate-800/50 border border-slate-700/50 p-6 rounded-xl lg:col-span-2 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+                        <h3 class="font-semibold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="cpu" class="w-4 h-4 text-emerald-400"></i> AI Risk Analysis Result
+                        </h3>
+                        <span id="risk-badge" class="px-3 py-1 rounded text-xs font-bold bg-slate-700 text-slate-300">AWAITING INPUT</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 my-6">
+                        <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800">
+                            <p class="text-xs text-slate-400">Fraud Probability</p>
+                            <h4 id="res-prob" class="text-3xl font-bold mt-1 text-slate-300">--%</h4>
+                        </div>
+                        <div class="bg-slate-900/60 p-4 rounded-lg border border-slate-800">
+                            <p class="text-xs text-slate-400">Recommended Action</p>
+                            <h4 id="res-action" class="text-3xl font-bold mt-1 text-slate-300">--</h4>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Key Risk Factors</p>
+                        <ul id="res-reasons" class="space-y-1.5 text-xs text-slate-300">
+                            <li class="text-slate-500 italic">Run an evaluation on the left to inspect SHAP explanation triggers.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="js/api.js"></script>
+    <script src="js/app.js"></script>
+    <script>lucide.createIcons();</script>
+</body>
+</html>
