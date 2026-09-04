@@ -1067,3 +1067,657 @@ class TestIntegration:
         suspicious_ids = [n['transaction_id'] for n in risk_t1['suspicious_neighbors']]
         assert 'T2' in suspicious_ids
         assert 'T3' not in suspicious_ids
+
+
+class TestNetworkRiskIndependence:
+    """A. Network-risk score must be identical regardless of ML risk input."""
+
+    @pytest.fixture
+    def calc(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        return NetworkRiskCalculator(builder.graph)
+
+    def test_network_risk_identical_across_ml_scores(self, calc):
+        """Build the same graph; call compute_network_risk with ML=10,50,90.
+        Assert network_risk_score is identical for all three."""
+        r_low = calc.compute_network_risk('T1', 10, 'LOW')
+        r_med = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        r_high = calc.compute_network_risk('T1', 90, 'HIGH')
+        assert r_low['network_risk_score'] == r_med['network_risk_score']
+        assert r_med['network_risk_score'] == r_high['network_risk_score']
+
+    def test_network_risk_level_identical_across_ml(self, calc):
+        r_low = calc.compute_network_risk('T1', 10, 'LOW')
+        r_high = calc.compute_network_risk('T1', 90, 'HIGH')
+        assert r_low['network_risk_level'] == r_high['network_risk_level']
+
+    def test_network_risk_factors_identical(self, calc):
+        r_low = calc.compute_network_risk('T1', 10, 'LOW')
+        r_high = calc.compute_network_risk('T1', 90, 'HIGH')
+        assert r_low['factors'] == r_high['factors']
+
+    def test_neighbor_counts_identical(self, calc):
+        r_low = calc.compute_network_risk('T1', 10, 'LOW')
+        r_high = calc.compute_network_risk('T1', 90, 'HIGH')
+        assert r_low['neighbor_count'] == r_high['neighbor_count']
+        assert r_low['suspicious_neighbor_count'] == r_high['suspicious_neighbor_count']
+
+    def test_isolated_transaction_independent_of_ml(self, calc):
+        """Isolated transaction (no connections) should also be independent."""
+        r_low = calc.compute_network_risk('T3', 0, 'LOW')
+        r_high = calc.compute_network_risk('T3', 100, 'HIGH')
+        assert r_low['network_risk_score'] == r_high['network_risk_score']
+        assert r_low['network_risk_score'] == 0
+
+
+class TestExactCombination:
+    """B. Verify exact 70/30 combination formula."""
+
+    @pytest.fixture
+    def calc(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T2': {'fraud_probability': 0.7, 'risk_score': 70, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        return NetworkRiskCalculator(builder.graph)
+
+    def test_combined_formula_ml_50(self, calc):
+        """combined = 0.70 * ml + 0.30 * network, tested with ML=50."""
+        ml_score = 50.0
+        result = calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        network_score = result['network_risk_score']
+        expected = round(0.70 * ml_score + 0.30 * network_score, 2)
+        assert result['combined_risk_score'] == pytest.approx(expected, abs=0.01)
+
+    def test_combined_formula_ml_80(self, calc):
+        """Test with ML=80."""
+        ml_score = 80.0
+        result = calc.compute_combined_risk('T1', ml_score, 'HIGH')
+        network_score = result['network_risk_score']
+        expected = round(0.70 * ml_score + 0.30 * network_score, 2)
+        assert result['combined_risk_score'] == pytest.approx(expected, abs=0.01)
+
+    def test_combined_formula_ml_0(self, calc):
+        """Test with ML=0."""
+        ml_score = 0.0
+        result = calc.compute_combined_risk('T1', ml_score, 'LOW')
+        network_score = result['network_risk_score']
+        expected = round(0.70 * ml_score + 0.30 * network_score, 2)
+        assert result['combined_risk_score'] == pytest.approx(expected, abs=0.01)
+
+    def test_combined_formula_ml_100(self, calc):
+        """Test with ML=100."""
+        ml_score = 100.0
+        result = calc.compute_combined_risk('T1', ml_score, 'HIGH')
+        network_score = result['network_risk_score']
+        expected = round(0.70 * ml_score + 0.30 * network_score, 2)
+        assert result['combined_risk_score'] == pytest.approx(expected, abs=0.01)
+
+    def test_combined_formula_ml_37(self, calc):
+        """Test with odd ML=37."""
+        ml_score = 37.0
+        result = calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        network_score = result['network_risk_score']
+        expected = round(0.70 * ml_score + 0.30 * network_score, 2)
+        assert result['combined_risk_score'] == pytest.approx(expected, abs=0.01)
+
+    def test_isolated_uses_ml_only(self, calc):
+        """For a nonexistent/absent transaction, combined == ML score."""
+        ml_score = 60.0
+        result = calc.compute_combined_risk('T999', ml_score, 'MEDIUM')
+        assert result['combined_risk_score'] == pytest.approx(ml_score, abs=0.01)
+
+
+class TestGraphOnlyChange:
+    """C. Change graph topology with fixed ML score; assert network changes, ML unchanged."""
+
+    @pytest.fixture
+    def base_calc(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+        return NetworkRiskCalculator(builder.graph)
+
+    @pytest.fixture
+    def connected_calc(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        return NetworkRiskCalculator(builder.graph)
+
+    def test_network_score_changes_with_topology(self, base_calc, connected_calc):
+        """T1 with no connections vs T1 with a suspicious connected transaction."""
+        ml_score = 50.0
+        r_alone = base_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        r_connected = connected_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        assert r_connected['network_risk_score'] > r_alone['network_risk_score']
+
+    def test_ml_score_unchanged_by_topology(self, base_calc, connected_calc):
+        """ML score must be the same regardless of graph topology."""
+        ml_score = 50.0
+        r_alone = base_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        r_connected = connected_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        assert r_alone['ml_risk_score'] == r_connected['ml_risk_score']
+        assert r_alone['ml_risk_score'] == ml_score
+
+    def test_combined_changes_when_graph_changes(self, base_calc, connected_calc):
+        """Combined score should differ when graph topology changes."""
+        ml_score = 50.0
+        r_alone = base_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        r_connected = connected_calc.compute_combined_risk('T1', ml_score, 'MEDIUM')
+        assert r_alone['combined_risk_score'] != r_connected['combined_risk_score']
+
+    def test_adding_strong_entity_increases_risk(self):
+        """Adding a shared card (strong entity) should increase network risk."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+
+        builder_alone = GraphBuilder()
+        builder_alone.build([
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+        ])
+        calc_alone = NetworkRiskCalculator(builder_alone.graph)
+
+        builder_shared = GraphBuilder()
+        builder_shared.build([
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'card1': 100},
+        ])
+        calc_shared = NetworkRiskCalculator(builder_shared.graph)
+
+        r_alone = calc_alone.compute_combined_risk('T1', 50, 'MEDIUM')
+        r_shared = calc_shared.compute_combined_risk('T1', 50, 'MEDIUM')
+        assert r_shared['network_risk_score'] > r_alone['network_risk_score']
+
+
+class TestSuspiciousNeighborDetection:
+    """D. Only transactions with fraud_probability >= 0.5 are counted as suspicious."""
+
+    @pytest.fixture
+    def calc(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.1, 'risk_score': 10, 'risk_level': 'LOW'},
+            'T2': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T3': {'fraud_probability': 0.3, 'risk_score': 30, 'risk_level': 'LOW'},
+        }
+        builder.build(txns, risks)
+        return NetworkRiskCalculator(builder.graph)
+
+    def test_only_suspicious_neighbor_counted(self, calc):
+        """T1 has 2 neighbors: T2 (fp=0.8 suspicious) and T3 (fp=0.3 safe)."""
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['suspicious_neighbor_count'] == 1
+
+    def test_total_neighbor_count_includes_all(self, calc):
+        """Both neighbors are counted in total neighbor count."""
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['neighbor_count'] == 2
+
+    def test_boundary_threshold_05_is_suspicious(self):
+        """Exactly 0.5 IS suspicious (>= threshold)."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator, SUSPICIOUS_THRESHOLD
+        assert SUSPICIOUS_THRESHOLD == 0.5
+
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T2': {'fraud_probability': 0.5, 'risk_score': 50, 'risk_level': 'MEDIUM'},
+        }
+        builder.build(txns, risks)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['suspicious_neighbor_count'] == 1
+
+    def test_boundary_below_threshold_not_suspicious(self):
+        """fraud_probability = 0.49 is NOT suspicious (< threshold)."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T2': {'fraud_probability': 0.49, 'risk_score': 49, 'risk_level': 'MEDIUM'},
+        }
+        builder.build(txns, risks)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['suspicious_neighbor_count'] == 0
+
+    def test_boundary_just_above_threshold(self):
+        """fraud_probability = 0.501 is suspicious."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T2': {'fraud_probability': 0.501, 'risk_score': 50, 'risk_level': 'MEDIUM'},
+        }
+        builder.build(txns, risks)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['suspicious_neighbor_count'] == 1
+
+    def test_all_suspicious_neighbors(self):
+        """All neighbors suspicious."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+            'T3': {'fraud_probability': 0.7, 'risk_score': 70, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        assert result['suspicious_neighbor_count'] == 2
+        assert result['neighbor_count'] == 2
+
+
+class TestWeakEntityBehavior:
+    """E. Common weak entities do not automatically produce HIGH network risk."""
+
+    def test_merchant_only_no_high(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'A1', 'merchant_id': 'COMMON_M', 'customer_id': 'C1'},
+            {'transaction_id': 'A2', 'merchant_id': 'COMMON_M', 'customer_id': 'C2'},
+            {'transaction_id': 'A3', 'merchant_id': 'COMMON_M', 'customer_id': 'C3'},
+            {'transaction_id': 'A4', 'merchant_id': 'COMMON_M', 'customer_id': 'C4'},
+            {'transaction_id': 'A5', 'merchant_id': 'COMMON_M', 'customer_id': 'C5'},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('A1', 0, 'LOW')
+        assert result['network_risk_level'] != 'HIGH'
+
+    def test_email_domain_only_no_high(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'E1', 'merchant_id': 'M1', 'customer_id': 'C1', 'P_emaildomain': 'gmail.com'},
+            {'transaction_id': 'E2', 'merchant_id': 'M2', 'customer_id': 'C2', 'P_emaildomain': 'gmail.com'},
+            {'transaction_id': 'E3', 'merchant_id': 'M3', 'customer_id': 'C3', 'P_emaildomain': 'gmail.com'},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('E1', 0, 'LOW')
+        assert result['network_risk_level'] != 'HIGH'
+
+    def test_customer_only_no_high(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'CU1', 'merchant_id': 'M1', 'customer_id': 'C_SHARED'},
+            {'transaction_id': 'CU2', 'merchant_id': 'M2', 'customer_id': 'C_SHARED'},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('CU1', 0, 'LOW')
+        assert result['network_risk_level'] != 'HIGH'
+
+    def test_weak_entities_still_contribute_to_score(self):
+        """Weak entities do contribute some score, just not HIGH."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'W1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+            {'transaction_id': 'W2', 'merchant_id': 'M1', 'customer_id': 'C2'},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('W1', 0, 'LOW')
+        assert result['network_risk_score'] > 0
+
+
+class TestStrongEntityBehavior:
+    """F. Shared device/card/address contribute to graph-derived risk."""
+
+    def test_shared_device_increases_risk(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'S1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'S2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result_shared = calc.compute_network_risk('S1', 0, 'LOW')
+
+        builder2 = GraphBuilder()
+        txns2 = [
+            {'transaction_id': 'S1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+            {'transaction_id': 'S2', 'merchant_id': 'M2', 'customer_id': 'C2'},
+        ]
+        builder2.build(txns2)
+        calc2 = NetworkRiskCalculator(builder2.graph)
+        result_alone = calc2.compute_network_risk('S1', 0, 'LOW')
+
+        assert result_shared['network_risk_score'] > result_alone['network_risk_score']
+
+    def test_shared_card_increases_risk(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'SC1', 'merchant_id': 'M1', 'customer_id': 'C1', 'card1': 999},
+            {'transaction_id': 'SC2', 'merchant_id': 'M2', 'customer_id': 'C2', 'card1': 999},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('SC1', 0, 'LOW')
+        assert result['network_risk_score'] > 0
+
+    def test_shared_address_increases_risk(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'SA1', 'merchant_id': 'M1', 'customer_id': 'C1', 'addr1': 315},
+            {'transaction_id': 'SA2', 'merchant_id': 'M2', 'customer_id': 'C2', 'addr1': 315},
+        ]
+        builder.build(txns)
+        calc = NetworkRiskCalculator(builder.graph)
+        result = calc.compute_network_risk('SA1', 0, 'LOW')
+        assert result['network_risk_score'] > 0
+
+    def test_multiple_strong_entities_higher_than_single(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+
+        builder_single = GraphBuilder()
+        builder_single.build([
+            {'transaction_id': 'MS1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'MS2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ])
+        calc_single = NetworkRiskCalculator(builder_single.graph)
+
+        builder_multi = GraphBuilder()
+        builder_multi.build([
+            {'transaction_id': 'MS1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 500, 'addr1': 100},
+            {'transaction_id': 'MS2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1', 'card1': 500, 'addr1': 100},
+        ])
+        calc_multi = NetworkRiskCalculator(builder_multi.graph)
+
+        r_single = calc_single.compute_network_risk('MS1', 0, 'LOW')
+        r_multi = calc_multi.compute_network_risk('MS1', 0, 'LOW')
+        assert r_multi['network_risk_score'] >= r_single['network_risk_score']
+
+
+class TestInvalidIdentifiersGraphLevel:
+    """G. Invalid identifiers never create graph entity nodes."""
+
+    @pytest.mark.parametrize("device_val", [
+        None, float('nan'), '', 'UNKNOWN', 'null', 'None', 'nan', '-1', '-1.0',
+    ])
+    def test_invalid_device_no_entity_node(self, device_val):
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txn = {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'}
+        if device_val is not None and isinstance(device_val, float) and math.isnan(device_val):
+            txn['device_id'] = device_val
+        else:
+            txn['device_id'] = device_val
+        builder.build([txn])
+        entity_nodes = [n for n, d in builder.graph.nodes(data=True) if d.get('node_type') == 'device']
+        assert len(entity_nodes) == 0
+
+    @pytest.mark.parametrize("card_val", [
+        None, float('nan'), '', 'UNKNOWN', 'null', 'None', 'nan', '-1', '-1.0',
+    ])
+    def test_invalid_card_no_entity_node(self, card_val):
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txn = {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'}
+        if card_val is not None and isinstance(card_val, float) and math.isnan(card_val):
+            txn['card1'] = card_val
+        else:
+            txn['card1'] = card_val
+        builder.build([txn])
+        entity_nodes = [n for n, d in builder.graph.nodes(data=True) if d.get('node_type') == 'card']
+        assert len(entity_nodes) == 0
+
+    @pytest.mark.parametrize("addr_val", [
+        None, float('nan'), '', 'UNKNOWN', 'null', 'None', 'nan', '-1', '-1.0',
+    ])
+    def test_invalid_address_no_entity_node(self, addr_val):
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txn = {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'}
+        if addr_val is not None and isinstance(addr_val, float) and math.isnan(addr_val):
+            txn['addr1'] = addr_val
+        else:
+            txn['addr1'] = addr_val
+        builder.build([txn])
+        entity_nodes = [n for n, d in builder.graph.nodes(data=True) if d.get('node_type') == 'address']
+        assert len(entity_nodes) == 0
+
+    @pytest.mark.parametrize("email_val", [
+        None, float('nan'), '', 'UNKNOWN', 'null', 'None', 'nan', '-1', '-1.0',
+    ])
+    def test_invalid_email_domain_no_entity_node(self, email_val):
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txn = {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'}
+        if email_val is not None and isinstance(email_val, float) and math.isnan(email_val):
+            txn['P_emaildomain'] = email_val
+        else:
+            txn['P_emaildomain'] = email_val
+        builder.build([txn])
+        entity_nodes = [n for n, d in builder.graph.nodes(data=True) if d.get('node_type') == 'email_domain']
+        assert len(entity_nodes) == 0
+
+    def test_valid_identifiers_do_create_nodes(self):
+        """Sanity check: valid identifiers DO create entity nodes."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        builder.build([{
+            'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1',
+            'device_id': 'DEV1', 'card1': 100, 'addr1': 315, 'P_emaildomain': 'gmail.com',
+        }])
+        assert any(d.get('node_type') == 'device' for _, d in builder.graph.nodes(data=True))
+        assert any(d.get('node_type') == 'card' for _, d in builder.graph.nodes(data=True))
+        assert any(d.get('node_type') == 'address' for _, d in builder.graph.nodes(data=True))
+        assert any(d.get('node_type') == 'email_domain' for _, d in builder.graph.nodes(data=True))
+
+
+class TestClusterGrouping:
+    """Verify cluster detection groups connected transactions correctly."""
+
+    def test_shared_device_same_cluster(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'A1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1'},
+            {'transaction_id': 'A2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+        ]
+        builder.build(txns)
+        detector = ClusterDetector(builder.graph)
+        cluster_a1 = detector.get_cluster_for_transaction('A1')
+        cluster_a2 = detector.get_cluster_for_transaction('A2')
+        assert cluster_a1['transaction_ids'] == cluster_a2['transaction_ids']
+
+    def test_isolated_transaction_own_cluster(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'ISO1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+            {'transaction_id': 'ISO2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+            {'transaction_id': 'ISO3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'D1'},
+        ]
+        builder.build(txns)
+        detector = ClusterDetector(builder.graph)
+        cluster_iso = detector.get_cluster_for_transaction('ISO1')
+        assert cluster_iso is not None
+        assert cluster_iso['total_transactions'] == 1
+        assert 'ISO1' in cluster_iso['transaction_ids']
+
+    def test_disconnected_groups_separate_clusters(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'G1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1'},
+            {'transaction_id': 'G2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+            {'transaction_id': 'G3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'D2'},
+            {'transaction_id': 'G4', 'merchant_id': 'M4', 'customer_id': 'C4', 'device_id': 'D2'},
+        ]
+        builder.build(txns)
+        detector = ClusterDetector(builder.graph)
+        cluster_g1 = detector.get_cluster_for_transaction('G1')
+        cluster_g3 = detector.get_cluster_for_transaction('G3')
+        assert set(cluster_g1['transaction_ids']) == {'G1', 'G2'}
+        assert set(cluster_g3['transaction_ids']) == {'G3', 'G4'}
+        assert cluster_g1['transaction_ids'] != cluster_g3['transaction_ids']
+
+    def test_weak_only_cluster_not_high(self):
+        """Cluster connected only via weak entities should not be HIGH risk."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'W1', 'merchant_id': 'SHARED_M', 'customer_id': 'C1'},
+            {'transaction_id': 'W2', 'merchant_id': 'SHARED_M', 'customer_id': 'C2'},
+            {'transaction_id': 'W3', 'merchant_id': 'SHARED_M', 'customer_id': 'C3'},
+        ]
+        builder.build(txns)
+        detector = ClusterDetector(builder.graph)
+        cluster = detector.get_cluster_for_transaction('W1')
+        assert cluster['risk_level'] != 'HIGH'
+
+    def test_strong_entity_high_suspicious_cluster(self):
+        """Cluster with strong entities + high suspicious ratio can be HIGH."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'ST1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1'},
+            {'transaction_id': 'ST2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+            {'transaction_id': 'ST3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'D1'},
+        ]
+        risks = {
+            'ST1': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+            'ST2': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'ST3': {'fraud_probability': 0.7, 'risk_score': 70, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        detector = ClusterDetector(builder.graph)
+        cluster = detector.get_cluster_for_transaction('ST1')
+        assert cluster['risk_level'] == 'HIGH'
+
+    def test_suspicious_ratio_calculation(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'SR1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1'},
+            {'transaction_id': 'SR2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+            {'transaction_id': 'SR3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'D1'},
+            {'transaction_id': 'SR4', 'merchant_id': 'M4', 'customer_id': 'C4', 'device_id': 'D1'},
+        ]
+        risks = {
+            'SR1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'SR2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+        }
+        builder.build(txns, risks)
+        detector = ClusterDetector(builder.graph)
+        cluster = detector.get_cluster_for_transaction('SR1')
+        expected_ratio = 2 / 4
+        assert cluster['suspicious_ratio'] == pytest.approx(expected_ratio, abs=0.01)
+
+    def test_average_risk_calculation(self):
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'AR1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1'},
+            {'transaction_id': 'AR2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1'},
+        ]
+        risks = {
+            'AR1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'AR2': {'fraud_probability': 0.2, 'risk_score': 20, 'risk_level': 'LOW'},
+        }
+        builder.build(txns, risks)
+        detector = ClusterDetector(builder.graph)
+        cluster = detector.get_cluster_for_transaction('AR1')
+        expected_avg = (80 + 20) / 2
+        assert cluster['avg_risk_score'] == pytest.approx(expected_avg, abs=0.01)
+
+    def test_weak_entities_no_strong_types_recorded(self):
+        """Clusters with only merchant/email_domain should list no strong entity types."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.cluster_detector import ClusterDetector
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'WT1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+            {'transaction_id': 'WT2', 'merchant_id': 'M1', 'customer_id': 'C2'},
+        ]
+        builder.build(txns)
+        detector = ClusterDetector(builder.graph)
+        cluster = detector.get_cluster_for_transaction('WT1')
+        assert len(cluster['strong_entity_types']) == 0
