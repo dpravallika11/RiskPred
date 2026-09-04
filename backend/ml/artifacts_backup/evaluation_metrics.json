@@ -1,0 +1,66 @@
+{
+  "evaluated_at": "2026-08-30T01:45:30.673430",
+  "model": "XGBClassifier",
+  "test_samples": 59054,
+  "test_fraud": 2066,
+  "test_legit": 56988,
+  "threshold": 0.4199999999999998,
+  "precision": 0.3569,
+  "recall": 0.8122,
+  "f1": 0.4959,
+  "roc_auc": 0.9609,
+  "pr_auc": 0.701,
+  "confusion_matrix": {
+    "tn": 53964,
+    "fp": 3024,
+    "fn": 388,
+    "tp": 1678
+  },
+  "fpr": 0.0531,
+  "fnr": 0.1878,
+  "cost_analysis": {
+    "fn_cost_assumption": 500,
+    "fp_cost_assumption": 50,
+    "total_fn_cost": 194000,
+    "total_fp_cost": 151200,
+    "total_cost": 345200
+  },
+  "threshold_sweep": [
+    {
+      "threshold": 0.3,
+      "precision": 0.256,
+      "recall": 0.8833,
+      "f1": 0.3969
+    },
+    {
+      "threshold": 0.4,
+      "precision": 0.341,
+      "recall": 0.8282,
+      "f1": 0.4831
+    },
+    {
+      "threshold": 0.5,
+      "precision": 0.4463,
+      "recall": 0.7711,
+      "f1": 0.5654
+    },
+    {
+      "threshold": 0.6,
+      "precision": 0.5621,
+      "recall": 0.712,
+      "f1": 0.6282
+    },
+    {
+      "threshold": 0.7,
+      "precision": 0.6668,
+      "recall": 0.6297,
+      "f1": 0.6477
+    },
+    {
+      "threshold": 0.8,
+      "precision": 0.7754,
+      "recall": 0.5363,
+      "f1": 0.634
+    }
+  ]
+}

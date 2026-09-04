@@ -1,0 +1,10 @@
+{
+  "threshold": 0.4199999999999998,
+  "method": "cost_sensitive",
+  "fn_cost_assumption": 500,
+  "fp_cost_assumption": 50,
+  "rationale": "Threshold optimized to minimize total expected cost. False Negative cost ($500) reflects average fraud loss. False Positive cost ($50) reflects customer friction and manual review overhead. Chosen to balance fraud detection with operational cost.",
+  "best_f1_threshold": 0.76,
+  "validation_roc_auc": 0.9168096107044654,
+  "validation_pr_auc": 0.5220810379277279
+}

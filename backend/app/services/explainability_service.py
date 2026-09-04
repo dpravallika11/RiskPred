@@ -1,38 +1,122 @@
+import os
+import sys
+import json
 import numpy as np
+import pandas as pd
+import joblib
 from typing import List, Dict, Any
 
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ml_dir = os.path.join(_backend_dir, 'ml')
+if _ml_dir not in sys.path:
+    sys.path.insert(0, _ml_dir)
+
+
 class ExplainabilityService:
-    def __init__(self, feature_names: List[str]):
-        self.feature_names = feature_names
+    """
+    SHAP-based explainability service for fraud detection.
 
-    def explain_transaction(self, raw_data: Dict[str, Any], proba: float) -> List[str]:
-        """Generates actionable risk factors based on feature thresholds and signals."""
-        reasons = []
+    Provides human-readable explanations for individual predictions,
+    including both risk-increasing and risk-decreasing factors.
+    """
 
-        amount = raw_data.get('amount', 0)
-        velocity = raw_data.get('velocity_5m', 1)
-        failed_attempts = raw_data.get('failed_attempts_24h', 0)
-        is_new_device = raw_data.get('is_new_device', False)
-        is_new_location = raw_data.get('is_new_location', False)
+    FEATURE_DESCRIPTIONS = {
+        'TransactionAmt': 'Transaction amount',
+        'log_TransactionAmt': 'Transaction amount (log scale)',
+        'dist1': 'Distance from billing address',
+        'dist2': 'Distance from shipping address',
+        'dist_ratio': 'Billing/shipping distance ratio',
+        'C1': 'Transaction count pattern (card-addr)',
+        'C2': 'Transaction count pattern (card)',
+        'C3': 'Address match pattern',
+        'C5': 'Transaction frequency signal',
+        'C6': 'Card usage pattern',
+        'C7': 'Address usage pattern',
+        'C13': 'Card velocity signal',
+        'C14': 'Address velocity signal',
+        'D1': 'Days since card first seen',
+        'D2': 'Days since address first seen',
+        'D3': 'Card transaction interval',
+        'D4': 'Address transaction interval',
+        'D15': 'Card-address timing',
+        'card1': 'Card identifier',
+        'card2': 'Card brand/type',
+        'card4': 'Card issuer',
+        'card6': 'Card type',
+        'addr1': 'Billing region',
+        'addr2': 'Billing country',
+        'id_01': 'Identity verification score',
+        'id_02': 'Identity risk score',
+        'id_15': 'Device geolocation match',
+        'id_17': 'Device fingerprint',
+        'ProductCD': 'Product category',
+        'P_emaildomain': 'Purchaser email domain',
+        'R_emaildomain': 'Recipient email domain',
+        'M1': 'Card-addr name match',
+        'M2': 'Card-addr email match',
+        'M3': 'Card-addr phone match',
+        'M4': 'Card-addr address match',
+        'M5': 'Card-addr birth date match',
+        'M6': 'Card-addr SSN match',
+        'DeviceType': 'Device type',
+        'email_known': 'Known email domain',
+        'same_email_domain': 'Email domain consistency',
+        'risk_signal_count': 'Elevated risk signal count',
+        'd_missing_count': 'Missing timedelta signals',
+    }
 
-        if amount > 10000:
-            reasons.append(f"Unusually high transaction amount (₹{amount:,.2f})")
-        
-        if velocity > 3:
-            reasons.append(f"High velocity spike ({velocity} transactions in 5 minutes)")
-            
-        if failed_attempts >= 2:
-            reasons.append(f"Multiple failed payment attempts ({failed_attempts} in last 24h)")
+    def __init__(self, model=None, preprocessor=None):
+        self.model = model
+        self.preprocessor = preprocessor
+        self._explainer = None
 
-        if is_new_device:
-            reasons.append("Unrecognized device fingerprint detected")
+        if model is not None:
+            import shap
+            self._explainer = shap.TreeExplainer(model)
 
-        if is_new_location:
-            reasons.append("Transaction originated from a new/unusual geographical location")
+    def explain(self, X_row: pd.DataFrame, top_k: int = 5) -> Dict[str, Any]:
+        if self._explainer is None:
+            return {
+                'risk_factors': [],
+                'risk_reducers': [],
+                'feature_impacts': [],
+            }
 
-        if not reasons and proba < 0.30:
-            reasons.append("Standard transaction profile with low risk signals")
-        elif not reasons:
-            reasons.append("Elevated risk probability based on historical feature combinations")
+        shap_values = self._explainer.shap_values(X_row)
+        if isinstance(shap_values, list):
+            sv = shap_values[1][0]
+        else:
+            sv = shap_values[0]
 
-        return reasons
+        feature_names = self.preprocessor.get_feature_names() if self.preprocessor else []
+        impacts = list(zip(feature_names, sv))
+        impacts.sort(key=lambda x: x[1], reverse=True)
+
+        risk_factors = []
+        for feat, val in impacts[:top_k * 2]:
+            if val > 0 and len(risk_factors) < top_k:
+                risk_factors.append({
+                    'feature': feat,
+                    'impact': round(float(val), 6),
+                    'direction': 'increases_risk',
+                    'description': self.FEATURE_DESCRIPTIONS.get(feat, feat),
+                })
+
+        risk_reducers = []
+        for feat, val in reversed(impacts):
+            if val < 0 and len(risk_reducers) < top_k:
+                risk_reducers.append({
+                    'feature': feat,
+                    'impact': round(float(val), 6),
+                    'direction': 'decreases_risk',
+                    'description': self.FEATURE_DESCRIPTIONS.get(feat, feat),
+                })
+
+        return {
+            'risk_factors': risk_factors,
+            'risk_reducers': risk_reducers,
+            'feature_impacts': [
+                {'feature': f, 'impact': round(float(v), 6)}
+                for f, v in impacts[:20]
+            ],
+        }
