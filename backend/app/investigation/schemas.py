@@ -71,3 +71,48 @@ class RiskAgentResult(BaseModel):
     risk_factors: List[Dict[str, Any]] = Field(default_factory=list)
     risk_reducers: List[Dict[str, Any]] = Field(default_factory=list)
     evidence_summary: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DetectedPattern(BaseModel):
+    pattern_type: str
+    description: str
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    severity: str = "UNKNOWN"
+
+
+class PatternAgentResult(BaseModel):
+    transaction_id: str
+    patterns: List[DetectedPattern] = Field(default_factory=list)
+    pattern_count: int = 0
+    summary: str = ""
+    evidence_summary: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceItem(BaseModel):
+    evidence_type: str
+    source: str
+    description: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+    available: bool = True
+
+
+class EvidenceAgentResult(BaseModel):
+    transaction_id: str
+    evidence: List[EvidenceItem] = Field(default_factory=list)
+    evidence_count: int = 0
+    summary: str = ""
+    availability: Dict[str, bool] = Field(default_factory=dict)
+
+
+class AgentError(BaseModel):
+    agent_name: str
+    error_message: str
+
+
+class InvestigationResult(BaseModel):
+    transaction_id: str
+    risk_assessment: Optional[RiskAgentResult] = None
+    pattern_analysis: Optional[PatternAgentResult] = None
+    evidence: Optional[EvidenceAgentResult] = None
+    agent_errors: List[AgentError] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

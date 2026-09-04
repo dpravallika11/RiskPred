@@ -6,9 +6,18 @@ from app.investigation.schemas import (
     NetworkRiskEvidence,
     ClusterEvidence,
     RiskAgentResult,
+    DetectedPattern,
+    PatternAgentResult,
+    EvidenceItem,
+    EvidenceAgentResult,
+    AgentError,
+    InvestigationResult,
 )
 from app.investigation.context import InvestigationContextService, investigation_service
 from app.investigation.risk_agent import RiskAgent, risk_agent
+from app.investigation.pattern_agent import PatternAgent, pattern_agent
+from app.investigation.evidence_agent import EvidenceAgent, evidence_agent
+from app.investigation.orchestrator import InvestigationOrchestrator, orchestrator
 
 __all__ = [
     "InvestigationContext",
@@ -18,8 +27,20 @@ __all__ = [
     "NetworkRiskEvidence",
     "ClusterEvidence",
     "RiskAgentResult",
+    "DetectedPattern",
+    "PatternAgentResult",
+    "EvidenceItem",
+    "EvidenceAgentResult",
+    "AgentError",
+    "InvestigationResult",
     "InvestigationContextService",
     "investigation_service",
     "RiskAgent",
     "risk_agent",
+    "PatternAgent",
+    "pattern_agent",
+    "EvidenceAgent",
+    "evidence_agent",
+    "InvestigationOrchestrator",
+    "orchestrator",
 ]
