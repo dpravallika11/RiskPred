@@ -116,3 +116,14 @@ class InvestigationResult(BaseModel):
     evidence: Optional[EvidenceAgentResult] = None
     agent_errors: List[AgentError] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class InvestigationReport(BaseModel):
+    transaction_id: str
+    risk_assessment: Optional[RiskAgentResult] = None
+    detected_patterns: Optional[PatternAgentResult] = None
+    evidence: Optional[EvidenceAgentResult] = None
+    conclusion: str
+    recommended_action: Optional[str] = None
+    agent_errors: List[AgentError] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

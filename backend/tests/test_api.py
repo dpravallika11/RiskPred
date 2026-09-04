@@ -309,3 +309,75 @@ class TestGraphAPI:
     def test_graph_cluster_lookup_before_build(self, client):
         response = client.get("/api/v1/graph/clusters/T1")
         assert response.status_code == 503
+
+
+class TestInvestigationReportAPI:
+    """Tests for the investigation report endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        return TestClient(app)
+
+    def test_report_endpoint_returns_200(self, client):
+        response = client.get("/api/v1/investigation/txn-test-001")
+        assert response.status_code == 200
+
+    def test_report_has_transaction_id(self, client):
+        response = client.get("/api/v1/investigation/txn-test-002")
+        data = response.json()
+        assert data["transaction_id"] == "txn-test-002"
+
+    def test_report_has_conclusion(self, client):
+        response = client.get("/api/v1/investigation/txn-test-003")
+        data = response.json()
+        assert "conclusion" in data
+        assert isinstance(data["conclusion"], str)
+        assert len(data["conclusion"]) > 0
+
+    def test_report_has_risk_assessment(self, client):
+        response = client.get("/api/v1/investigation/txn-test-004")
+        data = response.json()
+        assert "risk_assessment" in data
+
+    def test_report_has_patterns(self, client):
+        response = client.get("/api/v1/investigation/txn-test-005")
+        data = response.json()
+        assert "detected_patterns" in data
+
+    def test_report_has_evidence(self, client):
+        response = client.get("/api/v1/investigation/txn-test-006")
+        data = response.json()
+        assert "evidence" in data
+
+    def test_report_has_agent_errors(self, client):
+        response = client.get("/api/v1/investigation/txn-test-007")
+        data = response.json()
+        assert "agent_errors" in data
+        assert isinstance(data["agent_errors"], list)
+
+    def test_report_has_recommended_action(self, client):
+        response = client.get("/api/v1/investigation/txn-test-008")
+        data = response.json()
+        assert "recommended_action" in data
+
+    def test_context_endpoint_still_works(self, client):
+        response = client.get("/api/v1/investigation/txn-test-009/context")
+        assert response.status_code == 200
+        data = response.json()
+        assert "transaction_id" in data
+
+    def test_report_deterministic(self, client):
+        r1 = client.get("/api/v1/investigation/txn-det")
+        r2 = client.get("/api/v1/investigation/txn-det")
+        assert r1.json() == r2.json()
+
+    def test_report_conclusion_no_unsupported_facts(self, client):
+        response = client.get("/api/v1/investigation/txn-no-fake")
+        data = response.json()
+        conclusion = data["conclusion"].lower()
+        unsupported = [
+            "criminal", "money laundering", "stolen identity",
+            "fraud ring", "confirmed", "proven",
+        ]
+        for term in unsupported:
+            assert term not in conclusion
