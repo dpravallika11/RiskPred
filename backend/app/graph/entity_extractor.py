@@ -2,7 +2,7 @@ import math
 from typing import Dict, List, Any, Optional
 
 
-INVALID标识符标识符标识符 = frozenset({
+INVALID_IDENTIFIERS = frozenset({
     None, "UNKNOWN", "unknown", "", "N/A", "n/a", "null", "NULL",
     "NaN", "nan", "None", "none", "-1", "-1.0",
 })
@@ -16,7 +16,7 @@ def _is_valid_identifier(value: Any) -> bool:
     s = str(value).strip()
     if s == "":
         return False
-    if s in INVALID标识符标识符标识符:
+    if s in INVALID_IDENTIFIERS:
         return False
     return True
 
@@ -31,10 +31,14 @@ def _normalize_identifier(value: Any) -> Optional[str]:
 
 
 class EntityExtractor:
+    # Maps entity types to the transaction fields that represent them.
+    # "email" fields are P_emaildomain/R_emaildomain which are EMAIL DOMAINS,
+    # not individual email addresses. They represent weak shared attributes
+    # because multiple unrelated users legitimately share the same domain.
     ENTITY_FIELD_MAP = {
         "card": ["card1", "card2", "card3", "card4", "card5", "card6"],
         "device": ["device_id"],
-        "email": ["P_emaildomain", "R_emaildomain"],
+        "email_domain": ["P_emaildomain", "R_emaildomain"],
         "address": ["addr1", "addr2"],
         "merchant": ["merchant_id"],
         "customer": ["customer_id"],

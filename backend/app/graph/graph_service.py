@@ -1,5 +1,3 @@
-import os
-import sys
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
@@ -7,7 +5,7 @@ from app.graph.entity_extractor import EntityExtractor
 from app.graph.graph_builder import GraphBuilder
 from app.graph.graph_queries import GraphQuerier
 from app.graph.cluster_detector import ClusterDetector
-from app.graph.network_risk import NetworkRiskCalculator
+from app.graph.network_risk import NetworkRiskCalculator, SUSPICIOUS_THRESHOLD
 
 
 class GraphService:
@@ -52,6 +50,11 @@ class GraphService:
         if self._network_risk is None:
             self._network_risk = NetworkRiskCalculator(self._builder.graph)
 
+    def get_transaction_risk(self, txn_id: str) -> Optional[Dict[str, Any]]:
+        """Public method to retrieve stored ML risk for a transaction."""
+        self._ensure_ready()
+        return self._builder.get_transaction_risk(txn_id)
+
     def get_connected_transactions(self, txn_id: str) -> Dict[str, Any]:
         self._ensure_ready()
         connected = self._querier.get_connected_transactions(txn_id)
@@ -70,6 +73,7 @@ class GraphService:
         return self._querier.get_neighborhood(txn_id, max_hops)
 
     def get_neighborhood_risk(self, txn_id: str) -> Dict[str, Any]:
+        """Correctly identify suspicious neighbors based on their fraud probability."""
         self._ensure_ready()
         txn_risk = self._builder.get_transaction_risk(txn_id)
         if txn_risk:
@@ -78,22 +82,32 @@ class GraphService:
         else:
             ml_risk_score = 0
             ml_risk_level = "UNKNOWN"
+
         connected = self._querier.get_connected_transactions(txn_id)
-        suspicious = [
-            c for c in connected
-            if any(
-                e.get("type") == "transaction" or True
-                for e in c.get("shared_entities", [])
-            )
-        ]
+
+        suspicious_neighbors = []
+        shared_entity_types_set = set()
+        for conn in connected:
+            neighbor_id = conn["transaction_id"]
+            neighbor_risk = self._builder.get_transaction_risk(neighbor_id)
+            neighbor_fp = neighbor_risk.get("fraud_probability", 0) if neighbor_risk else 0
+            if neighbor_fp is not None and neighbor_fp >= SUSPICIOUS_THRESHOLD:
+                suspicious_neighbors.append({
+                    "transaction_id": neighbor_id,
+                    "fraud_probability": neighbor_fp,
+                    "risk_level": neighbor_risk.get("risk_level", "UNKNOWN") if neighbor_risk else "UNKNOWN",
+                })
+            for ent in conn.get("shared_entities", []):
+                shared_entity_types_set.add(ent.get("type", "unknown"))
+
         return {
             "transaction_id": txn_id,
             "ml_risk_score": ml_risk_score,
             "ml_risk_level": ml_risk_level,
             "neighbor_count": len(connected),
-            "suspicious_neighbor_count": len(suspicious),
-            "suspicious_neighbors": [],
-            "shared_entity_types": [],
+            "suspicious_neighbor_count": len(suspicious_neighbors),
+            "suspicious_neighbors": suspicious_neighbors,
+            "shared_entity_types": list(shared_entity_types_set),
             "network_context_added": len(connected) > 0,
         }
 

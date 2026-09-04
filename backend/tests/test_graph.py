@@ -28,14 +28,14 @@ class TestEntityExtractor:
         entities = extractor.extract(txn)
         assert 'card' in entities
         assert 'device' in entities
-        assert 'email' in entities
+        assert 'email_domain' in entities
         assert 'address' in entities
         assert 'merchant' in entities
         assert 'customer' in entities
         assert '100' in entities['card']
         assert 'visa' in entities['card']
         assert 'DEV1' in entities['device']
-        assert 'gmail.com' in entities['email']
+        assert 'gmail.com' in entities['email_domain']
         assert '315' in entities['address']
 
     def test_extract_missing_identifier(self, extractor):
@@ -46,7 +46,7 @@ class TestEntityExtractor:
         }
         entities = extractor.extract(txn)
         assert 'card' not in entities
-        assert 'email' not in entities
+        assert 'email_domain' not in entities
         assert 'address' not in entities
         assert 'device' not in entities
         assert 'merchant' in entities
@@ -128,9 +128,9 @@ class TestEntityExtractor:
             'R_emaildomain': 'yahoo.com',
         }
         entities = extractor.extract(txn)
-        assert 'email' in entities
-        assert 'gmail.com' in entities['email']
-        assert 'yahoo.com' in entities['email']
+        assert 'email_domain' in entities
+        assert 'gmail.com' in entities['email_domain']
+        assert 'yahoo.com' in entities['email_domain']
 
     def test_extract_r_emaildomain_only(self, extractor):
         txn = {
@@ -140,8 +140,8 @@ class TestEntityExtractor:
             'R_emaildomain': 'outlook.com',
         }
         entities = extractor.extract(txn)
-        assert 'email' in entities
-        assert 'outlook.com' in entities['email']
+        assert 'email_domain' in entities
+        assert 'outlook.com' in entities['email_domain']
 
     def test_extract_partial_identity_data(self, extractor):
         txn = {
@@ -154,8 +154,66 @@ class TestEntityExtractor:
         entities = extractor.extract(txn)
         assert 'card' in entities
         assert 'address' in entities
-        assert 'email' not in entities
+        assert 'email_domain' not in entities
         assert 'device' not in entities
+
+    def test_invalid_identifier_nan_string(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'device_id': 'nan',
+            'card1': 'NaN',
+        }
+        entities = extractor.extract(txn)
+        assert 'device' not in entities
+        assert 'card' not in entities
+
+    def test_invalid_identifier_none_string(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'device_id': 'None',
+            'card1': 'null',
+        }
+        entities = extractor.extract(txn)
+        assert 'device' not in entities
+        assert 'card' not in entities
+
+    def test_invalid_identifier_sentinel_values(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'device_id': '-1',
+            'card1': '-1.0',
+        }
+        entities = extractor.extract(txn)
+        assert 'device' not in entities
+        assert 'card' not in entities
+
+    def test_email_domain_not_email(self, extractor):
+        """Email fields represent domains, not individual addresses."""
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'P_emaildomain': 'gmail.com',
+        }
+        entities = extractor.extract(txn)
+        assert 'email' not in entities
+        assert 'email_domain' in entities
+
+    def test_missing_email_domain_no_node(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+        }
+        entities = extractor.extract(txn)
+        assert 'email_domain' not in entities
+        assert 'email' not in entities
 
 
 class TestEntityResolver:
@@ -326,6 +384,10 @@ class TestGraphBuilder:
         builder.build([self._make_txn('T1', device_id='DEV1')])
         edge_data = builder.graph.edges['T1', 'device:DEV1']
         assert edge_data['relationship'] == 'device'
+
+    def test_email_domain_node_key(self, builder):
+        builder.build([self._make_txn('T1', P_emaildomain='gmail.com')])
+        assert 'email_domain:gmail.com' in builder.graph
 
 
 class TestGraphQueries:
@@ -550,6 +612,68 @@ class TestNetworkRisk:
         result = calc.compute_combined_risk('T1', 100, 'HIGH')
         assert result['combined_risk_score'] <= 100
 
+    def test_network_score_independent_of_ml(self, calc):
+        """Network score must NOT use ML risk as its base."""
+        r1 = calc.compute_network_risk('T1', 10, 'LOW')
+        r2 = calc.compute_network_risk('T1', 90, 'HIGH')
+        # Network score is purely graph-derived, ML score should not affect it
+        assert r1['network_risk_score'] == r2['network_risk_score']
+
+    def test_combined_uses_correct_weights(self, calc):
+        """Combined = 0.70 * ML + 0.30 * network."""
+        ml_score = 80.0
+        result = calc.compute_combined_risk('T1', ml_score, 'HIGH')
+        network_score = result['network_risk_score']
+        expected = 0.70 * ml_score + 0.30 * network_score
+        assert abs(result['combined_risk_score'] - round(expected, 2)) < 0.01
+
+    def test_ml_change_does_not_affect_graph_score(self, calc):
+        """Changing ML score should not change graph score."""
+        r1 = calc.compute_combined_risk('T1', 50, 'MEDIUM')
+        r2 = calc.compute_combined_risk('T1', 90, 'HIGH')
+        assert r1['network_risk_score'] == r2['network_risk_score']
+        assert r1['combined_risk_score'] != r2['combined_risk_score']
+
+    def test_graph_score_bounded_0_100(self, calc):
+        for ml in [0, 50, 100]:
+            result = calc.compute_combined_risk('T1', ml, 'LOW')
+            assert 0 <= result['network_risk_score'] <= 100
+
+    def test_combined_score_bounded_0_100(self, calc):
+        for ml in [0, 50, 100]:
+            result = calc.compute_combined_risk('T1', ml, 'LOW')
+            assert 0 <= result['combined_risk_score'] <= 100
+
+    def test_no_connections_produces_baseline(self, calc):
+        result = calc.compute_network_risk('T4', 0, 'LOW')
+        assert result['network_risk_score'] == 0
+        assert result['neighbor_count'] == 0
+
+    def test_suspicious_neighbors_increase_graph_risk(self, calc):
+        """T1 has 1 suspicious neighbor (T2), T4 has 0 neighbors."""
+        r1 = calc.compute_network_risk('T1', 50, 'MEDIUM')
+        r4 = calc.compute_network_risk('T4', 50, 'MEDIUM')
+        assert r1['network_risk_score'] > r4['network_risk_score']
+        assert r1['suspicious_neighbor_count'] > r4['suspicious_neighbor_count']
+
+    def test_weak_entities_do_not_create_high_risk(self, calc):
+        """A transaction connected only via weak entities (merchant, customer)
+        should not automatically get HIGH risk from graph alone."""
+        from app.graph.graph_builder import GraphBuilder
+        from app.graph.network_risk import NetworkRiskCalculator
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'A1', 'merchant_id': 'COMMON_MERCHANT', 'customer_id': 'C1'},
+            {'transaction_id': 'A2', 'merchant_id': 'COMMON_MERCHANT', 'customer_id': 'C2'},
+            {'transaction_id': 'A3', 'merchant_id': 'COMMON_MERCHANT', 'customer_id': 'C3'},
+        ]
+        builder.build(txns)
+        calc_weak = NetworkRiskCalculator(builder.graph)
+        result = calc_weak.compute_network_risk('A1', 0, 'LOW')
+        # Connected only via merchant (weight=1.0) and customer (weight=0.5)
+        # Should NOT be HIGH risk
+        assert result['network_risk_level'] != 'HIGH'
+
 
 class TestGraphService:
     """Tests for the graph service orchestrator."""
@@ -634,6 +758,99 @@ class TestGraphService:
         assert service.last_built is None
         service.build(self._txns())
         assert service.last_built is not None
+
+    def test_get_transaction_risk_public(self, service):
+        """get_transaction_risk should work via public method."""
+        service.build(self._txns(), {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+        })
+        risk = service.get_transaction_risk('T1')
+        assert risk is not None
+        assert risk['risk_score'] == 80
+
+    def test_neighborhood_risk_safe_neighbor(self):
+        """A safe neighbor (low fraud probability) should not be marked suspicious."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T2': {'fraud_probability': 0.2, 'risk_score': 20, 'risk_level': 'LOW'},
+        }
+        svc.build(txns, risks)
+        result = svc.get_neighborhood_risk('T1')
+        assert result['neighbor_count'] == 1
+        assert result['suspicious_neighbor_count'] == 0
+        assert len(result['suspicious_neighbors']) == 0
+
+    def test_neighborhood_risk_suspicious_neighbor(self):
+        """A suspicious neighbor should be correctly identified."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+        }
+        svc.build(txns, risks)
+        result = svc.get_neighborhood_risk('T1')
+        assert result['neighbor_count'] == 1
+        assert result['suspicious_neighbor_count'] == 1
+        assert len(result['suspicious_neighbors']) == 1
+        assert result['suspicious_neighbors'][0]['transaction_id'] == 'T2'
+
+    def test_neighborhood_risk_multiple_neighbors(self):
+        """Multiple neighbors counted correctly."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'card1': 100},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.1, 'risk_score': 10, 'risk_level': 'LOW'},
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+            'T3': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+        }
+        svc.build(txns, risks)
+        result = svc.get_neighborhood_risk('T1')
+        assert result['neighbor_count'] == 2
+        assert result['suspicious_neighbor_count'] == 2
+
+    def test_neighborhood_risk_shared_entity_types(self):
+        """shared_entity_types correctly populated."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'card1': 100},
+        ]
+        svc.build(txns)
+        result = svc.get_neighborhood_risk('T1')
+        assert 'device' in result['shared_entity_types']
+        assert 'card' in result['shared_entity_types']
+
+    def test_neighborhood_risk_empty(self):
+        """Isolated transaction returns correct empty values."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'},
+        ]
+        svc.build(txns)
+        result = svc.get_neighborhood_risk('T1')
+        assert result['neighbor_count'] == 0
+        assert result['suspicious_neighbor_count'] == 0
+        assert result['suspicious_neighbors'] == []
+        assert result['network_context_added'] is False
 
 
 class TestGraphAPI:
@@ -763,6 +980,16 @@ class TestGraphAPI:
         data = response.json()
         assert data['transaction_count'] == 0
 
+    def test_graph_invalid_max_hops(self, client):
+        client.post("/api/v1/graph/build", json={"transactions": self._txns()})
+        response = client.get("/api/v1/graph/transaction/T1/neighborhood?max_hops=-1")
+        assert response.status_code == 422
+
+    def test_graph_max_hops_too_large(self, client):
+        client.post("/api/v1/graph/build", json={"transactions": self._txns()})
+        response = client.get("/api/v1/graph/transaction/T1/neighborhood?max_hops=10")
+        assert response.status_code == 422
+
 
 class TestIntegration:
     """Integration test: full pipeline from transactions to network risk."""
@@ -802,3 +1029,41 @@ class TestIntegration:
 
         suspicious = service.get_suspicious_transactions(threshold=0.5)
         assert len(suspicious) >= 2
+
+    def test_data_contract_fixture(self):
+        """Test the specific fixture from the Sprint 3.1 spec."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'D1', 'card1': 'C1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'D1', 'card1': 'C2'},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'D2', 'card1': 'C1'},
+            {'transaction_id': 'T4', 'merchant_id': 'M1', 'customer_id': 'C4', 'P_emaildomain': 'gmail.com'},
+        ]
+        risks = {
+            'T1': {'fraud_probability': 0.8, 'risk_score': 80, 'risk_level': 'HIGH'},
+            'T2': {'fraud_probability': 0.9, 'risk_score': 90, 'risk_level': 'HIGH'},
+            'T3': {'fraud_probability': 0.2, 'risk_score': 20, 'risk_level': 'LOW'},
+            'T4': {'fraud_probability': 0.1, 'risk_score': 10, 'risk_level': 'LOW'},
+        }
+        svc.build(txns, risks)
+
+        # T1 and T2 share device D1
+        conn_t1 = svc.get_connected_transactions('T1')
+        conn_ids = [c['transaction_id'] for c in conn_t1['connected_transactions']]
+        assert 'T2' in conn_ids
+
+        # T1 and T3 share card C1
+        assert 'T3' in conn_ids
+
+        # T4 only shares merchant M1 with T1
+        conn_t4 = svc.get_connected_transactions('T4')
+        conn_ids_t4 = [c['transaction_id'] for c in conn_t4['connected_transactions']]
+        assert 'T1' in conn_ids_t4
+
+        # Neighborhood risk: T1 has suspicious neighbor T2
+        risk_t1 = svc.get_neighborhood_risk('T1')
+        assert risk_t1['neighbor_count'] >= 1
+        suspicious_ids = [n['transaction_id'] for n in risk_t1['suspicious_neighbors']]
+        assert 'T2' in suspicious_ids
+        assert 'T3' not in suspicious_ids
