@@ -60,3 +60,14 @@ class InvestigationContext(BaseModel):
     graph: GraphEvidence = Field(default_factory=GraphEvidence)
     network_risk: Optional[NetworkRiskEvidence] = None
     cluster: Optional[ClusterEvidence] = None
+
+
+class RiskAgentResult(BaseModel):
+    transaction_id: str
+    risk_level: str
+    risk_score: float
+    assessment: str
+    reasons: List[str] = Field(default_factory=list)
+    risk_factors: List[Dict[str, Any]] = Field(default_factory=list)
+    risk_reducers: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_summary: Dict[str, Any] = Field(default_factory=dict)
