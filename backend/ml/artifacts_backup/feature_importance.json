@@ -1,0 +1,82 @@
+[
+  {
+    "feature": "C13",
+    "importance": 0.324962
+  },
+  {
+    "feature": "C5",
+    "importance": 0.297379
+  },
+  {
+    "feature": "C1",
+    "importance": 0.277892
+  },
+  {
+    "feature": "C14",
+    "importance": 0.253634
+  },
+  {
+    "feature": "TransactionAmt",
+    "importance": 0.217328
+  },
+  {
+    "feature": "M4",
+    "importance": 0.215564
+  },
+  {
+    "feature": "card6",
+    "importance": 0.189729
+  },
+  {
+    "feature": "D3",
+    "importance": 0.181476
+  },
+  {
+    "feature": "D1",
+    "importance": 0.180543
+  },
+  {
+    "feature": "card1",
+    "importance": 0.167598
+  },
+  {
+    "feature": "card_addr_ratio",
+    "importance": 0.165682
+  },
+  {
+    "feature": "D2",
+    "importance": 0.15774
+  },
+  {
+    "feature": "P_emaildomain",
+    "importance": 0.154695
+  },
+  {
+    "feature": "C2",
+    "importance": 0.143649
+  },
+  {
+    "feature": "C8",
+    "importance": 0.138238
+  },
+  {
+    "feature": "M6",
+    "importance": 0.130165
+  },
+  {
+    "feature": "D4",
+    "importance": 0.129091
+  },
+  {
+    "feature": "D15",
+    "importance": 0.126844
+  },
+  {
+    "feature": "card2",
+    "importance": 0.118589
+  },
+  {
+    "feature": "C11",
+    "importance": 0.114896
+  }
+]

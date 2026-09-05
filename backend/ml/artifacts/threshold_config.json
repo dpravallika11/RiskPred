@@ -1,0 +1,10 @@
+{
+  "threshold": 0.3999999999999998,
+  "method": "cost_sensitive",
+  "fn_cost_assumption": 500,
+  "fp_cost_assumption": 50,
+  "rationale": "Threshold optimized to minimize total expected cost on validation set. FN cost ($500) = avg fraud loss. FP cost ($50) = customer friction.",
+  "best_f1_threshold": 0.7400000000000001,
+  "validation_roc_auc": 0.918588877390322,
+  "validation_pr_auc": 0.5273403795511024
+}

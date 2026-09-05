@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+venv/
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.DS_Store
+backend/ml/artifacts/*.joblib
+backend/ml/data/*.csv
