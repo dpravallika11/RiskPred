@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 from app.graph.graph_service import graph_service
 from app.services.prediction_service import prediction_service
+from app.services.transaction_store import transaction_store
+from app.db.repositories import transaction_repo
 
 
 router = APIRouter()
@@ -55,6 +57,11 @@ async def graph_build(request: GraphBuildRequest):
     try:
         risk_results = {}
         for txn in request.transactions:
+            transaction_store.put(txn)
+            try:
+                transaction_repo.create(txn)
+            except Exception as exc:
+                print(f"[PERSISTENCE ERROR] transaction_id={txn.get('transaction_id')}: {exc}")
             txn_id = txn.get("transaction_id")
             if txn_id and prediction_service.is_ready:
                 try:

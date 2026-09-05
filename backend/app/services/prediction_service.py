@@ -152,30 +152,41 @@ class PredictionService:
             print(f"Warning: Failed to load ML artifacts: {e}")
             self.is_ready = False
 
+    _DB_TO_ML = {
+        'productcd': 'ProductCD',
+        'p_emaildomain': 'P_emaildomain',
+        'r_emaildomain': 'R_emaildomain',
+        'devicetype': 'DeviceType',
+    }
+
+    _OPTIONAL_KEYS = [
+        'productcd', 'card1', 'card2', 'card3', 'card4', 'card5', 'card6',
+        'addr1', 'addr2', 'dist1', 'dist2',
+        'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10',
+        'c11', 'c12', 'c13', 'c14',
+        'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10',
+        'd11', 'd12', 'd13', 'd14', 'd15',
+        'm1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9',
+        'p_emaildomain', 'r_emaildomain',
+        'devicetype', 'deviceinfo',
+        'id_01', 'id_02', 'id_12', 'id_13', 'id_14', 'id_15', 'id_16',
+        'id_17', 'id_19', 'id_20', 'id_30', 'id_31', 'id_33', 'id_34',
+        'id_36', 'id_37', 'id_38',
+    ]
+
     def _build_feature_vector(self, txn_dict: Dict[str, Any]) -> pd.DataFrame:
+        norm = {k.lower(): v for k, v in txn_dict.items()}
+
         raw_data = {
-            'TransactionAmt': txn_dict.get('amount', 0),
+            'TransactionAmt': norm.get('amount', 0),
             'TransactionDT': 86400,
             'isFraud': 0,
         }
 
-        optional_raw = [
-            'ProductCD', 'card1', 'card2', 'card3', 'card4', 'card5', 'card6',
-            'addr1', 'addr2', 'dist1', 'dist2',
-            'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8', 'C9', 'C10',
-            'C11', 'C12', 'C13', 'C14',
-            'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10',
-            'D11', 'D12', 'D13', 'D14', 'D15',
-            'M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9',
-            'P_emaildomain', 'R_emaildomain',
-            'DeviceType', 'DeviceInfo',
-            'id_01', 'id_02', 'id_12', 'id_13', 'id_14', 'id_15', 'id_16',
-            'id_17', 'id_19', 'id_20', 'id_30', 'id_31', 'id_33', 'id_34',
-            'id_36', 'id_37', 'id_38',
-        ]
-        for col in optional_raw:
-            if col in txn_dict and txn_dict[col] is not None:
-                raw_data[col] = txn_dict[col]
+        for col in self._OPTIONAL_KEYS:
+            if col in norm and norm[col] is not None:
+                ml_col = self._DB_TO_ML.get(col, col)
+                raw_data[ml_col] = norm[col]
 
         return pd.DataFrame([raw_data])
 

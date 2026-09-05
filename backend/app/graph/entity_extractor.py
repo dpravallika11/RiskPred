@@ -38,18 +38,19 @@ class EntityExtractor:
     ENTITY_FIELD_MAP = {
         "card": ["card1", "card2", "card3", "card4", "card5", "card6"],
         "device": ["device_id"],
-        "email_domain": ["P_emaildomain", "R_emaildomain"],
+        "email_domain": ["p_emaildomain", "r_emaildomain"],
         "address": ["addr1", "addr2"],
         "merchant": ["merchant_id"],
         "customer": ["customer_id"],
     }
 
     def extract(self, txn_dict: Dict[str, Any]) -> Dict[str, List[str]]:
+        norm = {k.lower(): v for k, v in txn_dict.items()}
         entities: Dict[str, List[str]] = {}
         for entity_type, fields in self.ENTITY_FIELD_MAP.items():
             values = []
             for field in fields:
-                raw = txn_dict.get(field)
+                raw = norm.get(field)
                 normalized = _normalize_identifier(raw)
                 if normalized is not None:
                     values.append(normalized)

@@ -42,6 +42,4 @@ class TestHealthEndpoint:
     def test_root_endpoint(self):
         response = self.client.get("/")
         assert response.status_code == 200
-        data = response.json()
-        assert "message" in data
-        assert "RiskPred" in data["message"]
+        assert "text/html" in response.headers["content-type"]

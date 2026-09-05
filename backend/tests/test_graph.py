@@ -215,6 +215,44 @@ class TestEntityExtractor:
         assert 'email_domain' not in entities
         assert 'email' not in entities
 
+    def test_extract_lowercase_email_domain_fields(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'p_emaildomain': 'gmail.com',
+            'r_emaildomain': 'yahoo.com',
+        }
+        entities = extractor.extract(txn)
+        assert 'email_domain' in entities
+        assert 'gmail.com' in entities['email_domain']
+        assert 'yahoo.com' in entities['email_domain']
+
+    def test_extract_pascalcase_email_domain_fields(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'P_emaildomain': 'gmail.com',
+            'R_emaildomain': 'yahoo.com',
+        }
+        entities = extractor.extract(txn)
+        assert 'email_domain' in entities
+        assert 'gmail.com' in entities['email_domain']
+        assert 'yahoo.com' in entities['email_domain']
+
+    def test_extract_mixed_case_fields(self, extractor):
+        txn = {
+            'transaction_id': 'T1',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'P_emaildomain': 'gmail.com',
+            'r_emaildomain': 'yahoo.com',
+        }
+        entities = extractor.extract(txn)
+        assert 'email_domain' in entities
+        assert len(entities['email_domain']) == 2
+
 
 class TestEntityResolver:
     """Tests for deterministic entity resolution."""

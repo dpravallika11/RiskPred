@@ -103,6 +103,93 @@ class TestPredictionAPI:
         data = response.json()
         assert data['risk_level'] in ('LOW', 'MEDIUM', 'HIGH')
 
+    def test_predict_accepts_pascalcase_optional_fields(self, client):
+        payload = self._valid_payload(
+            ProductCD='W',
+            P_emaildomain='gmail.com',
+            R_emaildomain='yahoo.com',
+            DeviceType='desktop',
+        )
+        response = client.post("/api/v1/predict", json=payload)
+        assert response.status_code == 200
+
+    def test_predict_accepts_lowercase_optional_fields(self, client):
+        payload = self._valid_payload(
+            productcd='W',
+            p_emaildomain='gmail.com',
+            r_emaildomain='yahoo.com',
+            devicetype='desktop',
+        )
+        response = client.post("/api/v1/predict", json=payload)
+        assert response.status_code == 200
+
+    def test_predict_accepts_all_optional_fields(self, client):
+        payload = self._valid_payload(
+            productcd='W', card1=13926, card2=404, card3=150,
+            card4='visa', card5=226, card6='credit',
+            addr1=315, addr2=87, dist1=24.0, dist2=6.0,
+            p_emaildomain='gmail.com', r_emaildomain='gmail.com',
+            devicetype='desktop',
+        )
+        response = client.post("/api/v1/predict", json=payload)
+        assert response.status_code == 200
+
+    def test_predict_model_dump_uses_lowercase_keys(self):
+        from app.schemas.transaction import TransactionCreate
+        txn = TransactionCreate(
+            transaction_id='DUMP_TEST',
+            merchant_id='M1',
+            customer_id='C1',
+            amount=100.0,
+            productcd='W',
+            p_emaildomain='gmail.com',
+            r_emaildomain='yahoo.com',
+            devicetype='desktop',
+        )
+        d = txn.model_dump()
+        assert 'productcd' in d
+        assert 'p_emaildomain' in d
+        assert 'r_emaildomain' in d
+        assert 'devicetype' in d
+        assert 'ProductCD' not in d
+        assert 'P_emaildomain' not in d
+
+    def test_predict_feature_vector_uses_ml_names(self):
+        from app.services.prediction_service import prediction_service
+        txn = {
+            'transaction_id': 'FV_TEST',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'amount': 100.0,
+            'productcd': 'W',
+            'p_emaildomain': 'gmail.com',
+            'r_emaildomain': 'yahoo.com',
+            'devicetype': 'desktop',
+        }
+        fv = prediction_service._build_feature_vector(txn)
+        assert 'ProductCD' in fv.columns
+        assert 'P_emaildomain' in fv.columns
+        assert 'R_emaildomain' in fv.columns
+        assert 'DeviceType' in fv.columns
+
+    def test_predict_feature_vector_handles_pascalcase_input(self):
+        from app.services.prediction_service import prediction_service
+        txn = {
+            'transaction_id': 'FV_TEST',
+            'merchant_id': 'M1',
+            'customer_id': 'C1',
+            'amount': 100.0,
+            'ProductCD': 'W',
+            'P_emaildomain': 'gmail.com',
+            'R_emaildomain': 'yahoo.com',
+            'DeviceType': 'desktop',
+        }
+        fv = prediction_service._build_feature_vector(txn)
+        assert 'ProductCD' in fv.columns
+        assert 'P_emaildomain' in fv.columns
+        assert 'R_emaildomain' in fv.columns
+        assert 'DeviceType' in fv.columns
+
 
 class TestGraphAPI:
     """Tests for graph API endpoints."""
@@ -110,9 +197,12 @@ class TestGraphAPI:
     @pytest.fixture(autouse=True)
     def reset_graph_service(self):
         from app.graph.graph_service import graph_service
+        from app.services.transaction_store import transaction_store
         graph_service.clear()
+        transaction_store.clear()
         yield
         graph_service.clear()
+        transaction_store.clear()
 
     @pytest.fixture
     def client(self):
