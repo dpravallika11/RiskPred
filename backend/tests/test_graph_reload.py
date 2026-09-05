@@ -913,3 +913,573 @@ class TestBuildPersistLoadRoundTrip:
         risk = fresh_service.get_transaction_risk("T1")
         assert risk is not None
         assert risk["risk_score"] == 80
+
+
+# ===========================================================================
+# Sprint 6.5: Edge-case hardening for persistent graph reload
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Helper for Sprint 6.5 tests
+# ---------------------------------------------------------------------------
+
+def _load_service(service, entities=None, edges=None, predictions=None):
+    """Helper to load a GraphService with mocked repos."""
+    e_repo = MagicMock()
+    e_repo.get_all.return_value = entities if entities is not None else _make_db_entities()
+    ed_repo = MagicMock()
+    ed_repo.get_all.return_value = edges if edges is not None else _make_db_graph_edges()
+    p_repo = MagicMock()
+    p_repo.get_recent.return_value = predictions if predictions is not None else []
+    with patch("app.graph.graph_service.entity_repo", e_repo), \
+         patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+         patch("app.graph.graph_service.prediction_repo", p_repo):
+        return service.load_from_db()
+
+
+# ===========================================================================
+# 16. Empty database / no persisted entities (startup-safe)
+# ===========================================================================
+
+class TestEmptyDatabaseStartupSafe:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_empty_db_returns_false(self, service):
+        result = _load_service(service, entities=[], edges=[], predictions=[])
+        assert result is False
+
+    def test_empty_db_graph_not_ready(self, service):
+        _load_service(service, entities=[], edges=[], predictions=[])
+        assert service.is_ready is False
+
+    def test_empty_db_counts_zero(self, service):
+        _load_service(service, entities=[], edges=[], predictions=[])
+        assert service.transaction_count == 0
+        assert service.entity_count == 0
+        assert service.edge_count == 0
+
+    def test_empty_db_no_nodes_in_graph(self, service):
+        _load_service(service, entities=[], edges=[], predictions=[])
+        assert len(service._builder.graph) == 0
+
+    def test_startup_load_graph_handler_does_not_crash_on_empty_db(self, service):
+        """Simulate the startup handler when load_from_db returns False."""
+        from unittest.mock import patch as mp
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = []
+        ed_repo = MagicMock()
+        ed_repo.get_all.return_value = []
+        p_repo = MagicMock()
+        p_repo.get_recent.return_value = []
+        with mp("app.graph.graph_service.entity_repo", e_repo), \
+             mp("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             mp("app.graph.graph_service.prediction_repo", p_repo):
+            loaded = service.load_from_db()
+        # Must not raise; graph stays not-ready
+        assert loaded is False
+        assert service.is_ready is False
+
+
+# ===========================================================================
+# 17. Empty graph_edges while entities exist
+# ===========================================================================
+
+class TestEmptyEdgesWithEntities:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_empty_edges_returns_true(self, service):
+        """Entities exist but no edges => graph is loaded (True) since entities are non-empty."""
+        result = _load_service(service, edges=[])
+        assert result is True
+
+    def test_empty_edges_graph_ready(self, service):
+        _load_service(service, edges=[])
+        assert service.is_ready is True
+
+    def test_empty_edges_no_transaction_nodes(self, service):
+        _load_service(service, edges=[])
+        assert service.transaction_count == 0
+
+    def test_empty_edges_no_entity_nodes_in_graph(self, service):
+        """Without edges, no entity nodes are added to the graph."""
+        _load_service(service, edges=[])
+        assert service.entity_count == 0
+
+    def test_empty_edges_zero_edge_count(self, service):
+        _load_service(service, edges=[])
+        assert service.edge_count == 0
+
+    def test_empty_edges_querier_works(self, service):
+        _load_service(service, edges=[])
+        result = service.get_connected_transactions("T1")
+        assert result["total_connections"] == 0
+
+    def test_empty_edges_clusters_empty(self, service):
+        _load_service(service, edges=[])
+        result = service.get_clusters()
+        assert result["total_clusters"] == 0
+        assert result["total_transactions_in_clusters"] == 0
+
+
+# ===========================================================================
+# 18. Missing entity referenced by a graph edge
+# ===========================================================================
+
+class TestMissingEntityReferencedByEdge:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_single_missing_entity_edge_skipped(self, service):
+        """Edge referencing entity 'e99' that does not exist is skipped safely."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e4", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge2", "transaction_id": "T1", "entity_id": "e99", "relationship": "card", "weight": 1.0},
+        ]
+        result = _load_service(service, edges=edges)
+        assert result is True
+        assert service.is_ready is True
+        # T1 should exist with merchant edge only
+        assert "T1" in service._builder.graph
+        assert service._builder.graph.has_edge("T1", "merchant:M1")
+        assert not service._builder.graph.has_edge("T1", "card:100")
+
+    def test_missing_entity_does_not_crash(self, service):
+        """Load does not crash even if all edges reference missing entities."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e99", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge2", "transaction_id": "T2", "entity_id": "e100", "relationship": "card", "weight": 1.0},
+        ]
+        result = _load_service(service, edges=edges)
+        assert result is True
+        assert service.is_ready is True
+
+    def test_all_missing_entities_empty_graph(self, service):
+        """If all edges reference missing entities, graph has transaction nodes but no entity nodes or edges."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e99", "relationship": "merchant", "weight": 1.0},
+        ]
+        _load_service(service, edges=edges)
+        assert "T1" in service._builder.graph
+        assert service.entity_count == 0
+        assert service.edge_count == 0
+
+    def test_mixed_present_and_missing_entities(self, service):
+        """Some edges have valid entities, some don't. Only valid edges are loaded."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e4", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge2", "transaction_id": "T1", "entity_id": "e99", "relationship": "card", "weight": 1.0},
+            {"id": "ge3", "transaction_id": "T2", "entity_id": "e5", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge4", "transaction_id": "T2", "entity_id": "e100", "relationship": "customer", "weight": 1.0},
+        ]
+        _load_service(service, edges=edges)
+        # T1 has merchant edge, T2 has merchant edge
+        assert service._builder.graph.has_edge("T1", "merchant:M1")
+        assert service._builder.graph.has_edge("T2", "merchant:M2")
+        assert service.edge_count == 2
+
+    def test_missing_entity_deterministic_results(self, service):
+        """Calling load twice with same missing-entity data produces identical graphs."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e4", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge2", "transaction_id": "T1", "entity_id": "e99", "relationship": "card", "weight": 1.0},
+        ]
+        _load_service(service, edges=edges)
+        first_nodes = set(service._builder.graph.nodes())
+        first_edges = service.edge_count
+
+        # Reload
+        _load_service(service, edges=edges)
+        second_nodes = set(service._builder.graph.nodes())
+        second_edges = service.edge_count
+
+        assert first_nodes == second_nodes
+        assert first_edges == second_edges
+
+    def test_missing_entity_resolver_consistent(self, service):
+        """Resolver only maps entities that were successfully loaded."""
+        edges = [
+            {"id": "ge1", "transaction_id": "T1", "entity_id": "e4", "relationship": "merchant", "weight": 1.0},
+            {"id": "ge2", "transaction_id": "T1", "entity_id": "e99", "relationship": "card", "weight": 1.0},
+        ]
+        _load_service(service, edges=edges)
+        resolver = service._builder.resolver
+        entities_for_t1 = resolver.get_entities_for_transaction("T1")
+        assert "merchant" in entities_for_t1
+        assert "card" not in entities_for_t1
+
+
+# ===========================================================================
+# 19. Prediction loading edge cases
+# ===========================================================================
+
+class TestPredictionLoadingEdgeCases:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_unrelated_predictions_do_not_create_nodes(self, service):
+        """Predictions for transaction IDs not in the graph should not create new nodes."""
+        predictions = [
+            {"transaction_id": "TX_UNKNOWN_1", "fraud_probability": 0.9, "risk_score": 90, "risk_level": "HIGH"},
+            {"transaction_id": "TX_UNKNOWN_2", "fraud_probability": 0.1, "risk_score": 10, "risk_level": "LOW"},
+        ]
+        _load_service(service, predictions=predictions)
+        txn_count = service.transaction_count
+        # Should only have the 4 original transactions (T1-T4), no extra from predictions
+        assert txn_count == 4
+        assert "TX_UNKNOWN_1" not in service._builder.graph
+        assert "TX_UNKNOWN_2" not in service._builder.graph
+
+    def test_malformed_prediction_missing_fields_skipped(self, service):
+        """Prediction with missing transaction_id or risk fields is skipped gracefully."""
+        predictions = [
+            {"transaction_id": None, "fraud_probability": 0.5, "risk_score": 50, "risk_level": "MEDIUM"},
+            {"transaction_id": "T1"},  # Missing risk fields - should use defaults
+            {"transaction_id": "T1", "fraud_probability": 0.7, "risk_score": 70, "risk_level": "HIGH"},
+        ]
+        result = _load_service(service, predictions=predictions)
+        assert result is True
+        assert service.is_ready is True
+        # T1 should still exist with risk from last prediction
+        risk = service.get_transaction_risk("T1")
+        assert risk is not None
+
+    def test_prediction_for_nonexistent_txn_ignored(self, service):
+        """Prediction referencing a transaction not in the graph is silently ignored."""
+        predictions = [
+            {"transaction_id": "T_NONEXISTENT", "fraud_probability": 0.99, "risk_score": 99, "risk_level": "HIGH"},
+        ]
+        _load_service(service, predictions=predictions)
+        assert "T_NONEXISTENT" not in service._builder.graph
+        assert len(service._builder._transaction_risk) == 0
+
+    def test_prediction_failure_still_loads_graph(self, service):
+        """If prediction_repo.get_recent raises, graph still loads successfully."""
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = _make_db_entities()
+        ed_repo = MagicMock()
+        ed_repo.get_all.return_value = _make_db_graph_edges()
+        p_repo = MagicMock()
+        p_repo.get_recent.side_effect = Exception("DB connection lost")
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            result = service.load_from_db()
+        assert result is True
+        assert service.is_ready is True
+        # Graph should have full structure, just no risk data
+        assert service.transaction_count == 4
+        assert service.entity_count == 12
+        risk = service.get_transaction_risk("T1")
+        assert risk is None
+
+    def test_empty_predictions_graph_loads_clean(self, service):
+        """No predictions means graph loads without risk data on any node."""
+        _load_service(service, predictions=[])
+        assert service.is_ready is True
+        for txn_id in ["T1", "T2", "T3", "T4"]:
+            assert service.get_transaction_risk(txn_id) is None
+
+
+# ===========================================================================
+# 20. Reload idempotency
+# ===========================================================================
+
+class TestReloadIdempotency:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_double_load_same_transaction_count(self, service):
+        _load_service(service)
+        first_txn = service.transaction_count
+        _load_service(service)
+        second_txn = service.transaction_count
+        assert first_txn == second_txn
+
+    def test_double_load_same_entity_count(self, service):
+        _load_service(service)
+        first_entity = service.entity_count
+        _load_service(service)
+        second_entity = service.entity_count
+        assert first_entity == second_entity
+
+    def test_double_load_same_edge_count(self, service):
+        _load_service(service)
+        first_edge = service.edge_count
+        _load_service(service)
+        second_edge = service.edge_count
+        assert first_edge == second_edge
+
+    def test_double_load_no_duplicate_nodes(self, service):
+        _load_service(service)
+        first_nodes = set(service._builder.graph.nodes())
+        _load_service(service)
+        second_nodes = set(service._builder.graph.nodes())
+        assert first_nodes == second_nodes
+
+    def test_double_load_no_duplicate_edges(self, service):
+        _load_service(service)
+        first_edges = set(service._builder.graph.edges())
+        _load_service(service)
+        second_edges = set(service._builder.graph.edges())
+        assert first_edges == second_edges
+
+    def test_triple_load_stable(self, service):
+        """Calling load_from_db three times produces identical results."""
+        _load_service(service)
+        txn3 = service.transaction_count
+        ent3 = service.entity_count
+        ed3 = service.edge_count
+
+        _load_service(service)
+        _load_service(service)
+
+        assert service.transaction_count == txn3
+        assert service.entity_count == ent3
+        assert service.edge_count == ed3
+
+    def test_idempotent_query_results(self, service):
+        """Graph queries return same results after multiple loads."""
+        _load_service(service)
+        first_connected = service.get_connected_transactions("T1")
+        first_clusters = service.get_clusters()
+
+        _load_service(service)
+        second_connected = service.get_connected_transactions("T1")
+        second_clusters = service.get_clusters()
+
+        assert first_connected["total_connections"] == second_connected["total_connections"]
+        assert first_clusters["total_clusters"] == second_clusters["total_clusters"]
+
+    def test_idempotent_resolver_state(self, service):
+        """Resolver maps are identical after multiple loads."""
+        _load_service(service)
+        first_reverse = {k: frozenset(v) for k, v in service._builder.resolver._reverse_map.items()}
+        first_entity = dict(service._builder.resolver._entity_map)
+
+        _load_service(service)
+        second_reverse = {k: frozenset(v) for k, v in service._builder.resolver._reverse_map.items()}
+        second_entity = dict(service._builder.resolver._entity_map)
+
+        assert first_reverse == second_reverse
+        assert first_entity == second_entity
+
+
+# ===========================================================================
+# 21. Reload failure handling
+# ===========================================================================
+
+class TestReloadFailureHandling:
+    @pytest.fixture
+    def service(self):
+        from app.graph.graph_service import GraphService
+        return GraphService()
+
+    def test_entity_repo_failure_returns_false(self, service):
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = Exception("Connection refused")
+        ed_repo = MagicMock()
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            result = service.load_from_db()
+        assert result is False
+        assert service.is_ready is False
+
+    def test_edge_repo_failure_after_entities_returns_false(self, service):
+        """Edge repo failure after entities loaded => graph cleared, returns False."""
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = _make_db_entities()
+        ed_repo = MagicMock()
+        ed_repo.get_all.side_effect = Exception("Timeout")
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            result = service.load_from_db()
+        assert result is False
+        assert service.is_ready is False
+
+    def test_edge_repo_failure_clears_graph(self, service):
+        """When edge repo fails after entities load, graph is cleared."""
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = _make_db_entities()
+        ed_repo = MagicMock()
+        ed_repo.get_all.side_effect = Exception("Timeout")
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            service.load_from_db()
+        # Graph should be empty (cleared during load attempt)
+        assert len(service._builder.graph) == 0
+
+    def test_entity_repo_failure_preserves_no_prior_graph(self, service):
+        """Entity repo failure on fresh service leaves it not-ready."""
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = Exception("Down")
+        ed_repo = MagicMock()
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            service.load_from_db()
+        assert service.is_ready is False
+        assert service.transaction_count == 0
+        assert service.entity_count == 0
+
+    def test_successful_build_then_load_failure_leaves_clean_state(self, service):
+        """Build succeeds, then load_from_db fails => service not-ready, empty graph."""
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+        ]
+        service.build(txns)
+        assert service.is_ready is True
+        assert service.transaction_count == 1
+
+        # Now simulate a fresh service that fails to load
+        fresh = type(service)()
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = Exception("DB down")
+        ed_repo = MagicMock()
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            result = fresh.load_from_db()
+        assert result is False
+        assert fresh.is_ready is False
+
+    def test_repository_timeout_returns_false(self, service):
+        """Simulate a timeout on the entity repo."""
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = TimeoutError("Request timed out")
+        ed_repo = MagicMock()
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            result = service.load_from_db()
+        assert result is False
+
+    def test_subsequent_build_after_failed_load_works(self, service):
+        """After a failed load, a manual build should still succeed."""
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = Exception("DB error")
+        ed_repo = MagicMock()
+        p_repo = MagicMock()
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            service.load_from_db()
+        assert service.is_ready is False
+
+        # Now build manually
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        service.build(txns)
+        assert service.is_ready is True
+        assert service.transaction_count == 2
+
+
+# ===========================================================================
+# 22. Startup failure handling (FastAPI startup contract)
+# ===========================================================================
+
+class TestStartupFailureHandling:
+    @pytest.fixture(autouse=True)
+    def reset_graph_service(self):
+        from app.graph.graph_service import graph_service
+        graph_service.clear()
+        yield
+        graph_service.clear()
+
+    def test_startup_succeeds_when_load_returns_false(self):
+        """FastAPI startup handler succeeds when load_from_db returns False."""
+        from app.main import startup_load_graph
+        from app.graph.graph_service import graph_service
+
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = []
+        ed_repo = MagicMock()
+        ed_repo.get_all.return_value = []
+        p_repo = MagicMock()
+        p_repo.get_recent.return_value = []
+
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            # Must not raise
+            import asyncio
+            asyncio.run(startup_load_graph())
+
+        assert graph_service.is_ready is False
+
+    def test_startup_succeeds_when_load_raises_exception(self):
+        """FastAPI startup handler catches exceptions and succeeds."""
+        from app.main import startup_load_graph
+        from app.graph.graph_service import graph_service
+
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = Exception("Fatal DB error")
+
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", MagicMock()), \
+             patch("app.graph.graph_service.prediction_repo", MagicMock()):
+            # Must not raise
+            import asyncio
+            asyncio.run(startup_load_graph())
+
+        assert graph_service.is_ready is False
+
+    def test_startup_succeeds_when_load_raises_runtime_error(self):
+        """FastAPI startup handler catches RuntimeError from load_from_db."""
+        from app.main import startup_load_graph
+        from app.graph.graph_service import graph_service
+
+        e_repo = MagicMock()
+        e_repo.get_all.side_effect = RuntimeError("Unexpected state")
+
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", MagicMock()), \
+             patch("app.graph.graph_service.prediction_repo", MagicMock()):
+            import asyncio
+            asyncio.run(startup_load_graph())
+
+        assert graph_service.is_ready is False
+
+    def test_startup_succeeds_when_load_returns_true(self):
+        """FastAPI startup handler succeeds and graph becomes ready when load succeeds."""
+        from app.main import startup_load_graph
+        from app.graph.graph_service import graph_service
+
+        e_repo = MagicMock()
+        e_repo.get_all.return_value = _make_db_entities()
+        ed_repo = MagicMock()
+        ed_repo.get_all.return_value = _make_db_graph_edges()
+        p_repo = MagicMock()
+        p_repo.get_recent.return_value = _make_db_predictions()
+
+        with patch("app.graph.graph_service.entity_repo", e_repo), \
+             patch("app.graph.graph_service.graph_edge_repo", ed_repo), \
+             patch("app.graph.graph_service.prediction_repo", p_repo):
+            import asyncio
+            asyncio.run(startup_load_graph())
+
+        assert graph_service.is_ready is True
+        assert graph_service.transaction_count == 4
