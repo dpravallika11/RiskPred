@@ -172,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     /* ── Graph Intelligence ──────────────────────────── */
     function renderGraphSection(report) {
-        var graphAvail = report.metadata && report.metadata.graph_available;
+        var graphAvail = report.evidence && report.evidence.availability && report.evidence.availability.graph;
         if (!graphAvail) {
             $('graph-content').innerHTML = C.emptyState(
                 '<circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/>',
