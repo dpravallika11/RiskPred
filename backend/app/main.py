@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,6 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.core.config import settings
 from app.api.routes import health, predictions, graph, investigation
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -49,3 +52,21 @@ async def serve_dashboard():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"error": "Frontend not found"}
+
+
+@app.on_event("startup")
+async def startup_load_graph():
+    """Attempt to load the persisted graph from Supabase on startup.
+
+    If the database is empty or unavailable, startup succeeds normally
+    and the graph remains not-ready (requires POST /api/v1/graph/build).
+    """
+    try:
+        from app.graph.graph_service import graph_service
+        loaded = graph_service.load_from_db()
+        if loaded:
+            logger.info("Graph successfully restored from Supabase on startup.")
+        else:
+            logger.info("No persisted graph found on startup. Graph will remain not-built.")
+    except Exception as exc:
+        logger.warning("Startup graph load skipped: %s", exc)

@@ -307,6 +307,15 @@ class GraphEdgeRepository:
         )
         return result.data or []
 
+    def get_all(self) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
+            .execute()
+        )
+        return result.data or []
+
     def delete_all(self) -> bool:
         sb = get_supabase()
         sb.table(self.table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
@@ -400,6 +409,15 @@ class EntityRepository:
             sb.table(self.junction_table)
             .select("*")
             .eq("entity_id", entity_id)
+            .execute()
+        )
+        return result.data or []
+
+    def get_all(self) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
             .execute()
         )
         return result.data or []
