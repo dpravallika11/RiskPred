@@ -138,10 +138,9 @@ class GraphEdge(Base):
     __tablename__ = "graph_edges"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source_transaction_id = Column(String, nullable=False, index=True)
-    target_transaction_id = Column(String, nullable=False, index=True)
-    edge_type = Column(String, nullable=False)
-    shared_entities = Column(JSONB, default=[])
+    transaction_id = Column(String, ForeignKey("transactions.transaction_id", ondelete="CASCADE"), nullable=False, index=True)
+    entity_id = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    relationship = Column(String, nullable=False)
     weight = Column(Float, default=1.0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -153,6 +152,7 @@ class Entity(Base):
     entity_type = Column(String, nullable=False, index=True)
     entity_value = Column(String, nullable=False, index=True)
     normalized_value = Column(String, nullable=True)
+    node_key = Column(String, nullable=False, unique=True, index=True)
     first_seen_at = Column(DateTime, default=datetime.utcnow)
     last_seen_at = Column(DateTime, default=datetime.utcnow)
 
@@ -163,6 +163,7 @@ class TransactionEntity(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     transaction_id = Column(String, ForeignKey("transactions.transaction_id", ondelete="CASCADE"), nullable=False, index=True)
     entity_id = Column(UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    relationship = Column(String, nullable=False)
 
 
 

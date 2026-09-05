@@ -74,7 +74,7 @@ async def graph_build(request: GraphBuildRequest):
                 except Exception:
                     pass
 
-        graph_service.build(request.transactions, risk_results)
+        graph_service.build(request.transactions, risk_results, persist=True)
         return {
             "status": "built",
             "transaction_count": graph_service.transaction_count,

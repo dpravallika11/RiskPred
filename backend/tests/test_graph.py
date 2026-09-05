@@ -1759,3 +1759,399 @@ class TestClusterGrouping:
         detector = ClusterDetector(builder.graph)
         cluster = detector.get_cluster_for_transaction('WT1')
         assert len(cluster['strong_entity_types']) == 0
+
+
+# ===========================================================================
+# Sprint 6.3: Graph Persistence (Dual-Write) Tests
+# ===========================================================================
+
+class TestGraphPersistence:
+    """Tests for graph persistence to Supabase during build (dual-write)."""
+
+    def _make_mock_entity_repo(self):
+        """Create a mock EntityRepository that tracks upserts and links."""
+        from unittest.mock import MagicMock
+        repo = MagicMock()
+        repo.upsert.side_effect = lambda entity_type, entity_value, normalized_value=None, node_key=None: {
+            "id": f"id-{entity_type}-{entity_value}",
+            "entity_type": entity_type,
+            "entity_value": entity_value,
+            "node_key": node_key or f"{entity_type}:{entity_value}",
+        }
+        repo.link_to_transaction.return_value = {"id": "link-id"}
+        repo.delete_all.return_value = True
+        return repo
+
+    def _make_mock_graph_edge_repo(self):
+        """Create a mock GraphEdgeRepository."""
+        from unittest.mock import MagicMock
+        repo = MagicMock()
+        repo.create_many.return_value = []
+        repo.delete_all.return_value = True
+        return repo
+
+    def test_graph_build_persists_entities(self):
+        """1. graph build persists entities."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # Should have called upsert for each entity (device, card, merchant, customer = 4 entities)
+        assert entity_repo.upsert.call_count == 4
+
+    def test_graph_build_persists_transaction_entity_relationships(self):
+        """2. graph build persists transaction/entity relationships."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # Should link transaction to each entity
+        link_calls = entity_repo.link_to_transaction.call_args_list
+        linked_entities = [call[0][1] for call in link_calls]
+        assert len(linked_entities) == 3  # device, merchant, customer
+
+    def test_graph_build_persists_graph_edges(self):
+        """3. graph build persists graph_edges."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        graph_edge_repo.create_many.assert_called_once()
+        edges = graph_edge_repo.create_many.call_args[0][0]
+        assert len(edges) == 3  # device, merchant, customer
+
+    def test_graph_edges_are_strictly_transaction_entity(self):
+        """4. graph edges are strictly Transaction ↔ Entity."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # Check that link_to_transaction only receives (txn_id, entity_id, relationship)
+        for call in entity_repo.link_to_transaction.call_args_list:
+            txn_id, entity_id, relationship = call[0]
+            # txn_id should be a transaction ID (T1 or T2)
+            assert txn_id.startswith("T")
+            # entity_id should be from entity upsert (id-device-DEV1, etc.)
+            assert entity_id.startswith("id-")
+
+    def test_node_key_format_is_correct(self):
+        """5. node_key format is correct (entity_type:entity_value)."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        upsert_calls = entity_repo.upsert.call_args_list
+        for call in upsert_calls:
+            kwargs = call[1]
+            node_key = kwargs.get("node_key", call[0][2] if len(call[0]) > 2 else None)
+            if node_key:
+                assert ":" in node_key, f"node_key should contain ':': {node_key}"
+                parts = node_key.split(":", 1)
+                assert parts[0] in ("device", "card", "email_domain", "address", "merchant", "customer")
+
+    def test_relationship_values_are_correct(self):
+        """6. relationship values are correct."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        link_calls = entity_repo.link_to_transaction.call_args_list
+        relationships = [call[0][2] for call in link_calls]
+        assert "device" in relationships
+        assert "card" in relationships
+        assert "merchant" in relationships
+        assert "customer" in relationships
+
+    def test_duplicate_entities_not_created(self):
+        """7. duplicate entities are not created."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+            {'transaction_id': 'T2', 'merchant_id': 'M1', 'customer_id': 'C2', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # upsert is called for each unique entity in the graph
+        # DEV1 appears twice but should only be upserted once
+        # M1 appears twice but should only be upserted once
+        # C1 and C2 are unique
+        upsert_calls = entity_repo.upsert.call_args_list
+        node_keys = [call[1].get("node_key") for call in upsert_calls]
+        # Each node_key should appear only once
+        assert len(node_keys) == len(set(node_keys))
+
+    def test_duplicate_transaction_entity_relationships_not_created(self):
+        """8. duplicate transaction/entity relationships are not created."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # Each link should be unique (txn_id, entity_id pair)
+        link_calls = entity_repo.link_to_transaction.call_args_list
+        pairs = [(call[0][0], call[0][1]) for call in link_calls]
+        assert len(pairs) == len(set(pairs))
+
+    def test_duplicate_graph_edges_not_created(self):
+        """9. duplicate graph edges are not created."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        edges = graph_edge_repo.create_many.call_args[0][0]
+        edge_keys = [(e["transaction_id"], e["entity_id"], e["relationship"]) for e in edges]
+        assert len(edge_keys) == len(set(edge_keys))
+
+    def test_rebuilding_graph_replaces_old_data(self):
+        """10. rebuilding the graph replaces old graph data."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # delete_all should be called before any writes
+        entity_repo.delete_all.assert_called_once()
+        graph_edge_repo.delete_all.assert_called_once()
+
+    def test_networkx_graph_still_built(self):
+        """11. NetworkX graph is still built after persist."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # NetworkX graph should still be fully functional
+        assert 'T1' in builder.graph
+        assert 'device:DEV1' in builder.graph
+        assert 'card:100' in builder.graph
+        assert builder.transaction_count == 1
+        assert builder.entity_count == 4
+
+    def test_existing_graph_build_response_unchanged(self):
+        """12. existing graph build response remains unchanged."""
+        from app.graph.graph_service import GraphService
+        svc = GraphService()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        # Build without persist
+        svc.build(txns)
+        assert svc.is_ready
+        assert svc.transaction_count == 1
+        result_without = {
+            'transaction_count': svc.transaction_count,
+            'entity_count': svc.entity_count,
+            'edge_count': svc.edge_count,
+        }
+
+        # Build with persist (mocked)
+        svc2 = GraphService()
+        from unittest.mock import patch
+        with patch("app.db.repositories.entity_repo") as mock_entity_repo, \
+             patch("app.db.repositories.graph_edge_repo") as mock_graph_edge_repo:
+            mock_entity_repo.upsert.return_value = {"id": "fake-id"}
+            mock_entity_repo.delete_all.return_value = True
+            mock_entity_repo.link_to_transaction.return_value = {"id": "link-id"}
+            mock_graph_edge_repo.delete_all.return_value = True
+            mock_graph_edge_repo.create_many.return_value = []
+            svc2.build(txns, persist=True)
+
+        assert svc2.is_ready
+        assert svc2.transaction_count == result_without['transaction_count']
+        assert svc2.entity_count == result_without['entity_count']
+        assert svc2.edge_count == result_without['edge_count']
+
+    def test_persistence_failure_does_not_destroy_in_memory_graph(self):
+        """13. persistence failure does not destroy the in-memory graph."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'},
+        ]
+        builder.build(txns)
+
+        from unittest.mock import MagicMock
+        entity_repo = MagicMock()
+        entity_repo.delete_all.side_effect = Exception("DB connection failed")
+        graph_edge_repo = MagicMock()
+
+        result = builder.persist_graph(entity_repo, graph_edge_repo)
+
+        assert result is False
+        # NetworkX graph should still be intact
+        assert 'T1' in builder.graph
+        assert 'device:DEV1' in builder.graph
+        assert builder.transaction_count == 1
+
+    def test_no_secrets_in_logs(self):
+        """14. no Supabase secrets appear in logs."""
+        import logging
+        from io import StringIO
+        from app.graph.graph_builder import GraphBuilder
+
+        log_stream = StringIO()
+        handler = logging.StreamHandler(log_stream)
+        handler.setLevel(logging.ERROR)
+        logger = logging.getLogger("app.graph.graph_builder")
+        logger.addHandler(handler)
+
+        builder = GraphBuilder()
+        txns = [{'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1'}]
+        builder.build(txns)
+
+        from unittest.mock import MagicMock
+        entity_repo = MagicMock()
+        entity_repo.delete_all.side_effect = Exception("Connection refused")
+        graph_edge_repo = MagicMock()
+
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        logger.removeHandler(handler)
+        log_output = log_stream.getvalue()
+        # The log message should not contain secrets or credentials
+        assert "service_role" not in log_output.lower()
+        assert "supabase" not in log_output.lower()
+        assert "secret" not in log_output.lower()
+        assert "key" not in log_output.lower()
+        assert "password" not in log_output.lower()
+        assert "token" not in log_output.lower()
+        assert "Graph persistence failed" in log_output
+
+    def test_persist_build_flow_with_shared_entities(self):
+        """Full dual-write flow with shared entities."""
+        from app.graph.graph_builder import GraphBuilder
+        builder = GraphBuilder()
+        txns = [
+            {'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1', 'card1': 100},
+            {'transaction_id': 'T2', 'merchant_id': 'M2', 'customer_id': 'C2', 'device_id': 'DEV1', 'card1': 200},
+            {'transaction_id': 'T3', 'merchant_id': 'M3', 'customer_id': 'C3', 'device_id': 'DEV2', 'card1': 100},
+        ]
+        builder.build(txns)
+
+        entity_repo = self._make_mock_entity_repo()
+        graph_edge_repo = self._make_mock_graph_edge_repo()
+        builder.persist_graph(entity_repo, graph_edge_repo)
+
+        # Verify entities: DEV1, DEV2, M1, M2, M3, C1, C2, C3, 100, 200 = 10 unique entities
+        upsert_calls = entity_repo.upsert.call_args_list
+        node_keys = [call[1].get("node_key") for call in upsert_calls]
+        assert len(node_keys) == 10
+
+        # Verify edges: T1 has 4 edges (DEV1, M1, C1, 100), T2 has 4 (DEV1, M2, C2, 200), T3 has 4 (DEV2, M3, C3, 100) = 12 total
+        edges = graph_edge_repo.create_many.call_args[0][0]
+        assert len(edges) == 12
+
+        # No transaction-to-transaction edges
+        for edge in edges:
+            assert edge["transaction_id"].startswith("T")
+            assert edge["entity_id"].startswith("id-")
+
+    def test_graph_service_build_persist_delegates_to_builder(self):
+        """GraphService.build with persist=True delegates to GraphBuilder.persist_graph."""
+        from unittest.mock import patch
+        from app.graph.graph_service import GraphService
+
+        svc = GraphService()
+        txns = [{'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'}]
+
+        with patch("app.db.repositories.entity_repo") as mock_entity_repo, \
+             patch("app.db.repositories.graph_edge_repo") as mock_graph_edge_repo:
+            mock_entity_repo.upsert.return_value = {"id": "fake-id"}
+            mock_entity_repo.delete_all.return_value = True
+            mock_entity_repo.link_to_transaction.return_value = {"id": "link-id"}
+            mock_graph_edge_repo.delete_all.return_value = True
+            mock_graph_edge_repo.create_many.return_value = []
+            svc.build(txns, persist=True)
+
+        mock_entity_repo.delete_all.assert_called_once()
+        mock_graph_edge_repo.delete_all.assert_called_once()
+        mock_entity_repo.upsert.assert_called()
+        mock_graph_edge_repo.create_many.assert_called_once()
+
+    def test_graph_service_build_without_persist_does_not_write(self):
+        """GraphService.build without persist does NOT write to Supabase."""
+        from unittest.mock import patch
+        from app.graph.graph_service import GraphService
+
+        svc = GraphService()
+        txns = [{'transaction_id': 'T1', 'merchant_id': 'M1', 'customer_id': 'C1', 'device_id': 'DEV1'}]
+
+        with patch("app.db.repositories.entity_repo") as mock_entity_repo, \
+             patch("app.db.repositories.graph_edge_repo") as mock_graph_edge_repo:
+            svc.build(txns, persist=False)
+
+        mock_entity_repo.upsert.assert_not_called()
+        mock_graph_edge_repo.create_many.assert_not_called()

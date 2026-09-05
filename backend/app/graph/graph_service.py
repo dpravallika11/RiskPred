@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
@@ -6,6 +7,9 @@ from app.graph.graph_builder import GraphBuilder
 from app.graph.graph_queries import GraphQuerier
 from app.graph.cluster_detector import ClusterDetector
 from app.graph.network_risk import NetworkRiskCalculator, SUSPICIOUS_THRESHOLD
+from app.db.repositories import entity_repo, graph_edge_repo, prediction_repo
+
+logger = logging.getLogger(__name__)
 
 
 class GraphService:
@@ -37,13 +41,136 @@ class GraphService:
     def edge_count(self) -> int:
         return self._builder.edge_count
 
-    def build(self, transactions: List[Dict[str, Any]], risk_results: Optional[Dict[str, Dict[str, Any]]] = None):
+    def build(self, transactions: List[Dict[str, Any]], risk_results: Optional[Dict[str, Dict[str, Any]]] = None, persist: bool = False):
         self._builder.build(transactions, risk_results)
         self._querier = GraphQuerier(self._builder.graph, self._builder.resolver)
         self._cluster_detector = ClusterDetector(self._builder.graph)
         self._network_risk = NetworkRiskCalculator(self._builder.graph)
         self._last_built = datetime.now(timezone.utc)
         self._is_ready = True
+
+        if persist:
+            self._persist_graph_to_db()
+
+    def _persist_graph_to_db(self):
+        """Persist the in-memory graph to Supabase. Failures are logged but do not affect the in-memory graph."""
+        try:
+            from app.db.repositories import entity_repo, graph_edge_repo
+            self._builder.persist_graph(entity_repo, graph_edge_repo)
+        except Exception as exc:
+            logger.error("Graph persistence to DB failed: %s", exc)
+
+    def load_from_db(self) -> bool:
+        """Load the persisted graph from Supabase and reconstruct the NetworkX graph.
+
+        Returns True if the graph was successfully loaded, False otherwise.
+        On failure, the graph remains in its current state (not-ready if freshly created).
+        """
+        try:
+            # 1. Load persisted entities and graph edges from Supabase
+            entities = entity_repo.get_all()
+            graph_edges = graph_edge_repo.get_all()
+
+            if not entities:
+                logger.info("No persisted graph data found in Supabase.")
+                return False
+
+            # 2. Clear current in-memory state
+            self._builder.clear()
+
+            # 3. Build entity_id -> entity record lookup
+            entity_by_id = {e["id"]: e for e in entities}
+
+            # 4. Collect all unique transaction IDs from graph edges
+            txn_ids = set()
+            for edge in graph_edges:
+                txn_ids.add(edge["transaction_id"])
+
+            # 5. Add transaction nodes
+            for txn_id in txn_ids:
+                self._builder._graph.add_node(txn_id, node_type="transaction")
+
+            # 6. Add entity nodes and edges
+            for edge in graph_edges:
+                txn_id = edge["transaction_id"]
+                entity_id = edge["entity_id"]
+                relationship = edge.get("relationship", "unknown")
+
+                entity_record = entity_by_id.get(entity_id)
+                if not entity_record:
+                    continue
+
+                node_key = entity_record["node_key"]
+                entity_type = entity_record["entity_type"]
+                entity_value = entity_record["entity_value"]
+
+                if node_key not in self._builder._graph:
+                    self._builder._graph.add_node(
+                        node_key,
+                        node_type=entity_type,
+                        value=entity_value,
+                    )
+
+                self._builder._graph.add_edge(txn_id, node_key, relationship=relationship)
+
+            # 7. Reconstruct EntityResolver internal maps
+            for edge in graph_edges:
+                txn_id = edge["transaction_id"]
+                entity_id = edge["entity_id"]
+                relationship = edge.get("relationship", "unknown")
+
+                entity_record = entity_by_id.get(entity_id)
+                if not entity_record:
+                    continue
+
+                node_key = entity_record["node_key"]
+
+                # _reverse_map: node_key -> set of transaction_ids
+                if node_key not in self._builder._resolver._reverse_map:
+                    self._builder._resolver._reverse_map[node_key] = set()
+                self._builder._resolver._reverse_map[node_key].add(txn_id)
+
+                # _entity_map: transaction_id -> {entity_type: node_key}
+                if txn_id not in self._builder._resolver._entity_map:
+                    self._builder._resolver._entity_map[txn_id] = {}
+                self._builder._resolver._entity_map[txn_id][relationship] = node_key
+
+            # 8. Load risk data from predictions table
+            try:
+                recent_predictions = prediction_repo.get_recent(limit=500)
+                for pred in recent_predictions:
+                    txn_id = pred.get("transaction_id")
+                    if txn_id and txn_id in self._builder._graph:
+                        risk = {
+                            "fraud_probability": pred.get("fraud_probability", 0),
+                            "risk_score": pred.get("risk_score", 0),
+                            "risk_level": pred.get("risk_level", "UNKNOWN"),
+                        }
+                        self._builder._transaction_risk[txn_id] = risk
+                        self._builder._graph.nodes[txn_id]["fraud_probability"] = risk["fraud_probability"]
+                        self._builder._graph.nodes[txn_id]["risk_score"] = risk["risk_score"]
+                        self._builder._graph.nodes[txn_id]["risk_level"] = risk["risk_level"]
+            except Exception as exc:
+                logger.warning("Could not load prediction risk data: %s", exc)
+
+            # 9. Wire up querier, cluster detector, and network risk calculator
+            self._querier = GraphQuerier(self._builder.graph, self._builder.resolver)
+            self._cluster_detector = ClusterDetector(self._builder.graph)
+            self._network_risk = NetworkRiskCalculator(self._builder.graph)
+            self._last_built = datetime.now(timezone.utc)
+            self._is_ready = True
+
+            logger.info(
+                "Graph loaded from Supabase: %d transactions, %d entities, %d edges",
+                self.transaction_count,
+                self.entity_count,
+                self.edge_count,
+            )
+            return True
+
+        except Exception as exc:
+            logger.error("Failed to load graph from Supabase: %s", exc)
+            return False
 
     def add_transaction_risk(self, txn_id: str, risk: Dict[str, Any]):
         self._builder.add_risk_to_transaction(txn_id, risk)

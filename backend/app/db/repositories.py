@@ -277,7 +277,7 @@ class AgentResultRepository:
 
 
 class GraphEdgeRepository:
-    """CRUD operations for graph_edges table via Supabase."""
+    """CRUD operations for graph_edges table (TransactionNode ↔ EntityNode)."""
 
     def __init__(self):
         self.table = "graph_edges"
@@ -292,7 +292,26 @@ class GraphEdgeRepository:
         result = (
             sb.table(self.table)
             .select("*")
-            .or_(f"source_transaction_id.eq.{transaction_id},target_transaction_id.eq.{transaction_id}")
+            .eq("transaction_id", transaction_id)
+            .execute()
+        )
+        return result.data or []
+
+    def get_by_entity_id(self, entity_id: str) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
+            .eq("entity_id", entity_id)
+            .execute()
+        )
+        return result.data or []
+
+    def get_all(self) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
             .execute()
         )
         return result.data or []
@@ -310,8 +329,13 @@ class EntityRepository:
         self.table = "entities"
         self.junction_table = "transaction_entities"
 
-    def upsert(self, entity_type: str, entity_value: str, normalized_value: str = None) -> Dict[str, Any]:
+    def _make_node_key(self, entity_type: str, entity_value: str) -> str:
+        return f"{entity_type}:{entity_value}"
+
+    def upsert(self, entity_type: str, entity_value: str, normalized_value: str = None, node_key: str = None) -> Dict[str, Any]:
         sb = get_supabase()
+        if node_key is None:
+            node_key = self._make_node_key(entity_type, entity_value)
         existing = (
             sb.table(self.table)
             .select("*")
@@ -326,14 +350,46 @@ class EntityRepository:
             "entity_type": entity_type,
             "entity_value": entity_value,
             "normalized_value": normalized_value,
+            "node_key": node_key,
         }).execute()
         return result.data[0] if result.data else None
 
-    def link_to_transaction(self, transaction_id: str, entity_id: str) -> Dict[str, Any]:
+    def get_entity_by_key(self, entity_type: str, entity_value: str) -> Optional[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
+            .eq("entity_type", entity_type)
+            .eq("entity_value", entity_value)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def get_entity_by_node_key(self, node_key: str) -> Optional[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
+            .eq("node_key", node_key)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def get_all_entity_keys(self) -> List[str]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("node_key")
+            .execute()
+        )
+        return [row["node_key"] for row in (result.data or [])]
+
+    def link_to_transaction(self, transaction_id: str, entity_id: str, relationship: str) -> Dict[str, Any]:
         sb = get_supabase()
         result = sb.table(self.junction_table).insert({
             "transaction_id": transaction_id,
             "entity_id": entity_id,
+            "relationship": relationship,
         }).execute()
         return result.data[0] if result.data else None
 
@@ -346,6 +402,30 @@ class EntityRepository:
             .execute()
         )
         return result.data or []
+
+    def get_transactions_for_entity(self, entity_id: str) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.junction_table)
+            .select("*")
+            .eq("entity_id", entity_id)
+            .execute()
+        )
+        return result.data or []
+
+    def get_all(self) -> List[Dict[str, Any]]:
+        sb = get_supabase()
+        result = (
+            sb.table(self.table)
+            .select("*")
+            .execute()
+        )
+        return result.data or []
+
+    def delete_all(self) -> bool:
+        sb = get_supabase()
+        sb.table(self.junction_table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        return True
 
 
 # Singleton instances
