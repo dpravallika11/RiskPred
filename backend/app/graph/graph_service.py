@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
@@ -6,6 +7,8 @@ from app.graph.graph_builder import GraphBuilder
 from app.graph.graph_queries import GraphQuerier
 from app.graph.cluster_detector import ClusterDetector
 from app.graph.network_risk import NetworkRiskCalculator, SUSPICIOUS_THRESHOLD
+
+logger = logging.getLogger(__name__)
 
 
 class GraphService:
@@ -37,13 +40,24 @@ class GraphService:
     def edge_count(self) -> int:
         return self._builder.edge_count
 
-    def build(self, transactions: List[Dict[str, Any]], risk_results: Optional[Dict[str, Dict[str, Any]]] = None):
+    def build(self, transactions: List[Dict[str, Any]], risk_results: Optional[Dict[str, Dict[str, Any]]] = None, persist: bool = False):
         self._builder.build(transactions, risk_results)
         self._querier = GraphQuerier(self._builder.graph, self._builder.resolver)
         self._cluster_detector = ClusterDetector(self._builder.graph)
         self._network_risk = NetworkRiskCalculator(self._builder.graph)
         self._last_built = datetime.now(timezone.utc)
         self._is_ready = True
+
+        if persist:
+            self._persist_graph_to_db()
+
+    def _persist_graph_to_db(self):
+        """Persist the in-memory graph to Supabase. Failures are logged but do not affect the in-memory graph."""
+        try:
+            from app.db.repositories import entity_repo, graph_edge_repo
+            self._builder.persist_graph(entity_repo, graph_edge_repo)
+        except Exception as exc:
+            logger.error("Graph persistence to DB failed: %s", exc)
 
     def add_transaction_risk(self, txn_id: str, risk: Dict[str, Any]):
         self._builder.add_risk_to_transaction(txn_id, risk)

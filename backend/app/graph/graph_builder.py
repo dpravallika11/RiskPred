@@ -1,7 +1,10 @@
+import logging
 import networkx as nx
 from typing import Dict, List, Any, Optional, Set
 from app.graph.entity_extractor import EntityExtractor
 from app.graph.entity_resolver import EntityResolver
+
+logger = logging.getLogger(__name__)
 
 
 class GraphBuilder:
@@ -73,6 +76,70 @@ class GraphBuilder:
         self._resolver.clear()
         self._transaction_risk.clear()
         self._extractor = EntityExtractor()
+
+    def persist_graph(self, entity_repo, graph_edge_repo) -> bool:
+        """Persist the in-memory graph to Supabase.
+
+        Args:
+            entity_repo: EntityRepository instance for upserting entities and creating links.
+            graph_edge_repo: GraphEdgeRepository instance for creating graph edges.
+
+        Returns:
+            True if all persistence operations succeeded, False otherwise.
+        """
+        try:
+            # 1. Clean previous graph data
+            graph_edge_repo.delete_all()
+            entity_repo.delete_all()
+
+            # 2. Upsert entities
+            node_key_to_entity_id: Dict[str, str] = {}
+            for entity_key, data in self._graph.nodes(data=True):
+                if data.get("node_type") == "transaction":
+                    continue
+                entity_type = data.get("node_type", "unknown")
+                entity_value = data.get("value", entity_key.split(":", 1)[-1] if ":" in entity_key else entity_key)
+                entity_record = entity_repo.upsert(
+                    entity_type=entity_type,
+                    entity_value=entity_value,
+                    normalized_value=entity_value,
+                    node_key=entity_key,
+                )
+                if entity_record:
+                    node_key_to_entity_id[entity_key] = entity_record["id"]
+
+            # 3. Link transactions to entities and create graph edges
+            graph_edges = []
+            for node1, node2, edge_data in self._graph.edges(data=True):
+                data1 = self._graph.nodes.get(node1, {})
+                data2 = self._graph.nodes.get(node2, {})
+                if data1.get("node_type") == "transaction":
+                    txn_id, entity_key = node1, node2
+                elif data2.get("node_type") == "transaction":
+                    txn_id, entity_key = node2, node1
+                else:
+                    continue
+
+                entity_id = node_key_to_entity_id.get(entity_key)
+                if entity_id is None:
+                    continue
+                relationship = edge_data.get("relationship", "unknown")
+                entity_repo.link_to_transaction(txn_id, entity_id, relationship)
+                graph_edges.append({
+                    "transaction_id": txn_id,
+                    "entity_id": entity_id,
+                    "relationship": relationship,
+                    "weight": 1.0,
+                })
+
+            # 4. Batch insert graph edges
+            if graph_edges:
+                graph_edge_repo.create_many(graph_edges)
+
+            return True
+        except Exception:
+            logger.error("Graph persistence failed", exc_info=True)
+            return False
 
     @property
     def transaction_count(self) -> int:

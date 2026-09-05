@@ -132,37 +132,39 @@ CREATE TABLE IF NOT EXISTS agent_results (
 CREATE INDEX IF NOT EXISTS idx_agent_results_investigation_id ON agent_results(investigation_id);
 
 -- ============================================================
--- 8. GRAPH EDGES TABLE (for persistent graph storage)
--- ============================================================
-CREATE TABLE IF NOT EXISTS graph_edges (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    source_transaction_id TEXT NOT NULL,
-    target_transaction_id TEXT NOT NULL,
-    edge_type TEXT NOT NULL,
-    shared_entities JSONB DEFAULT '[]',
-    weight NUMERIC(5,2) DEFAULT 1.0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(source_transaction_id, target_transaction_id, edge_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_transaction_id);
-CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_transaction_id);
-
--- ============================================================
--- 9. ENTITIES TABLE (for entity resolution)
+-- 8. ENTITIES TABLE (for entity resolution)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS entities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     entity_type TEXT NOT NULL,
     entity_value TEXT NOT NULL,
     normalized_value TEXT,
+    node_key TEXT NOT NULL,
     first_seen_at TIMESTAMPTZ DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(entity_type, entity_value)
+    UNIQUE(entity_type, entity_value),
+    UNIQUE(node_key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_entities_value ON entities(entity_value);
+CREATE INDEX IF NOT EXISTS idx_entities_node_key ON entities(node_key);
+
+-- ============================================================
+-- 9. GRAPH EDGES TABLE (TransactionNode ↔ EntityNode)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    transaction_id TEXT NOT NULL REFERENCES transactions(transaction_id) ON DELETE CASCADE,
+    entity_id UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    relationship TEXT NOT NULL,
+    weight NUMERIC(5,2) DEFAULT 1.0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(transaction_id, entity_id, relationship)
+);
+
+CREATE INDEX IF NOT EXISTS idx_graph_edges_transaction ON graph_edges(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_entity ON graph_edges(entity_id);
 
 -- ============================================================
 -- 10. TRANSACTION_ENTITIES JUNCTION TABLE
@@ -171,7 +173,8 @@ CREATE TABLE IF NOT EXISTS transaction_entities (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     transaction_id TEXT NOT NULL REFERENCES transactions(transaction_id) ON DELETE CASCADE,
     entity_id UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
-    UNIQUE(transaction_id, entity_id)
+    relationship TEXT NOT NULL,
+    UNIQUE(transaction_id, entity_id, relationship)
 );
 
 CREATE INDEX IF NOT EXISTS idx_tx_entities_transaction ON transaction_entities(transaction_id);
