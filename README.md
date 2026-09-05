@@ -1,199 +1,476 @@
-# RiskPred — AI Risk Manager
+Absolutely. Since **AI Risk Manager** is now the product name and the project has completed ML, SHAP, Graph Intelligence, Agentic Investigation, FastAPI dashboard, and Supabase persistence, the README should reflect the **actual final implementation** rather than the earlier scaffold.
 
-RiskPred is an AI-powered fraud risk management system designed to help merchants and risk analysts investigate suspicious financial transactions.
+Here is the updated `README.md` content:
 
-The system combines machine-learning-based transaction risk prediction with explainability, graph-based intelligence, and a deterministic multi-agent investigation pipeline.
+````markdown
+# AI Risk Manager
+
+### Intelligent Fraud Detection, Graph Intelligence & Agentic Investigation
+
+AI Risk Manager is an AI-powered fraud detection and investigation system designed to identify suspicious transactions, explain why they are risky, uncover hidden relationships between transactions, and provide an actionable investigation report.
+
+The system combines:
+
+- Machine Learning-based fraud prediction
+- SHAP-based explainability
+- Graph-based transaction relationship analysis
+- Network risk analysis
+- Cluster intelligence
+- Deterministic agentic investigation
+- Supabase persistence
+- A lightweight web dashboard
+
+> **AI Risk Manager doesn't just predict fraud — it explains, connects, investigates and helps act.**
 
 ---
 
-## Overview
+## Project Objective
 
-RiskPred follows this investigation flow:
+Traditional fraud detection systems often stop after assigning a fraud probability.
 
-```text
-Transaction
-     │
-     ▼
-ML Risk Prediction
-     │
-     ├── Fraud Probability
-     ├── Risk Score
-     ├── Risk Level
-     ├── Recommended Action
-     └── SHAP Explanation
-     │
-     ▼
-Graph Intelligence
-     │
-     ├── Connections
-     ├── Suspicious Neighbors
-     ├── Shared Entities
-     ├── Network Risk
-     └── Cluster Intelligence
-     │
-     ▼
-Agent Investigation
-     │
-     ├── Risk Agent
-     ├── Pattern Agent
-     └── Evidence Agent
-     │
-     ▼
-Investigation Report
-     │
-     ├── Risk Assessment
-     ├── Detected Patterns
-     ├── Evidence
-     ├── Conclusion
-     └── Recommended Action
-```
+AI Risk Manager goes further by answering four important questions:
+
+1. **Is this transaction risky?**
+2. **Why is it risky?**
+3. **Is it connected to other suspicious activity?**
+4. **What action should be taken?**
+
+The system combines ML prediction, explainable AI, graph intelligence and agent-based investigation into a single workflow.
 
 ---
 
 ## Key Features
 
-### Machine Learning Risk Prediction
+### 1. ML Fraud Detection
 
-RiskPred uses the existing trained fraud-detection model to evaluate transactions and provide:
+The system uses the IEEE-CIS Fraud Detection dataset and an XGBoost classification model.
 
-* Fraud probability
-* Risk score
-* Risk level
-* Recommended action
-* Risk factors
-* Risk reducers
-* SHAP-based explanation
-
-The prediction service is reused throughout the investigation pipeline rather than creating a separate risk-scoring system.
-
-### Explainable AI
-
-RiskPred provides explainability through SHAP-derived:
-
-* Risk factors
-* Risk reducers
-
-This allows analysts to understand which transaction characteristics contribute to the predicted risk.
-
-### Graph Intelligence
-
-The system builds transaction/entity relationships and provides graph-based investigation capabilities including:
-
-* Transaction connections
-* Transaction neighborhoods
-* Suspicious neighbors
-* Shared entities
-* Network risk
-* Cluster intelligence
-
-Graph evidence is only displayed when it is actually available.
-
-### Multi-Agent Investigation
-
-RiskPred contains a deterministic investigation pipeline consisting of:
-
-#### Risk Agent
-
-Evaluates the available risk information and produces a structured risk assessment.
-
-#### Pattern Agent
-
-Identifies suspicious patterns from the available graph and transaction context.
-
-#### Evidence Agent
-
-Collects and structures supporting evidence from the available investigation sources.
-
-#### Investigation Orchestrator
-
-Coordinates the agents in the following order:
+The ML pipeline performs:
 
 ```text
+Transaction Data
+       ↓
+Preprocessing
+       ↓
+Feature Engineering
+       ↓
+XGBoost Model
+       ↓
+Fraud Probability
+       ↓
+Risk Score
+       ↓
+Risk Level
+       ↓
+Recommended Action
+````
+
+The model uses an optimized decision threshold of `0.40`.
+
+### Model Evaluation
+
+| Metric              | Result |
+| ------------------- | -----: |
+| Precision           | 36.93% |
+| Recall              | 83.74% |
+| F1 Score            | 51.26% |
+| PR-AUC              | 0.7173 |
+| ROC-AUC             | 0.9640 |
+| False Positive Rate |  5.18% |
+| False Negative Rate | 16.26% |
+| Decision Threshold  |   0.40 |
+
+The threshold prioritizes detecting fraudulent transactions while maintaining a manageable false-positive rate.
+
+---
+
+## 2. Explainable AI with SHAP
+
+AI Risk Manager does not treat the ML model as a black box.
+
+SHAP is used to explain individual predictions by identifying:
+
+* Features increasing risk
+* Features reducing risk
+* Relative feature impact
+
+For every investigation, the dashboard can display:
+
+```text
+Top Risk Factors
+        +
+Top Risk Reducers
+        ↓
+Explanation of ML Decision
+```
+
+This helps investigators understand the reasoning behind a prediction instead of relying only on a numerical score.
+
+---
+
+## 3. Graph Intelligence
+
+Fraud can involve relationships between multiple transactions.
+
+AI Risk Manager builds a transaction-entity graph using relationships such as:
+
+* Customer
+* Merchant
+* Device
+* Card
+* Email domain
+
+Example:
+
+```text
+             Device
+               |
+               |
+Transaction ─ Entity ─ Transaction
+     |           |
+   Card       Merchant
+```
+
+The graph layer can identify:
+
+* Shared entities
+* Connected transactions
+* Suspicious neighbors
+* Connection density
+* Transaction neighborhoods
+* Cluster membership
+
+This allows the system to detect patterns that may not be visible from a single transaction alone.
+
+---
+
+## 4. Network Risk Analysis
+
+Graph relationships are incorporated into a network risk analysis layer.
+
+The system evaluates factors such as:
+
+* Number of connected transactions
+* Shared entities
+* Connection density
+* Suspicious neighboring transactions
+
+The result provides:
+
+```text
+ML Risk Score
+      +
+Network Risk
+      ↓
+Combined Risk Assessment
+```
+
+This provides additional context around an individual transaction.
+
+---
+
+## 5. Cluster Intelligence
+
+Connected transactions are grouped into graph-based clusters.
+
+Cluster analysis provides information such as:
+
+* Number of transactions
+* Number of entities
+* Suspicious transaction count
+* Suspicious transaction ratio
+* Average risk score
+* Strong entity types
+* Weak entity types
+* Shared identifiers
+
+This helps identify groups of transactions that may be related.
+
+---
+
+# Agentic Investigation
+
+AI Risk Manager uses three deterministic investigation agents.
+
+## Risk Agent
+
+The Risk Agent evaluates the overall risk assessment using the existing ML and graph-derived risk information.
+
+It produces:
+
+* Risk level
+* Risk score
+* Assessment
+* Risk factors
+* Risk reducers
+* Evidence summary
+
+---
+
+## Pattern Agent
+
+The Pattern Agent identifies suspicious patterns from the investigation context.
+
+It evaluates patterns such as:
+
+* Suspicious neighbors
+* Shared entities
+* Cluster membership
+* Dense connections
+
+The agent reports detected patterns and their severity.
+
+---
+
+## Evidence Agent
+
+The Evidence Agent collects supporting evidence from different system components.
+
+Evidence categories include:
+
+* Transaction
+* ML prediction
+* SHAP
+* Graph
+* Network risk
+* Cluster
+
+Unavailable information is explicitly marked as unavailable rather than being fabricated.
+
+---
+
+## Investigation Workflow
+
+The complete investigation pipeline is:
+
+```text
+Transaction
+     ↓
+ML Prediction
+     ↓
+SHAP Explanation
+     ↓
+Graph Analysis
+     ↓
+Network Risk
+     ↓
+Cluster Detection
+     ↓
 Risk Agent
      ↓
 Pattern Agent
      ↓
 Evidence Agent
+     ↓
+Investigation Report
+     ↓
+Recommended Action
 ```
 
-Agent failures are isolated so that one failed agent does not prevent the remaining investigation components from executing.
+The orchestrator coordinates the three investigation agents without creating a separate competing risk engine.
 
-### Investigation Report
+---
 
-The investigation pipeline produces a structured report containing:
+# Investigation Report
 
+The final investigation report combines all available intelligence into one result.
+
+It contains:
+
+* Transaction information
 * Risk assessment
 * Detected patterns
-* Evidence
+* Evidence items
 * Conclusion
 * Recommended action
-* Agent errors
-* Metadata
+* Agent errors, when applicable
+* Investigation metadata
 
-Unavailable evidence is explicitly represented instead of being fabricated.
+The system explicitly handles missing or unavailable evidence.
 
-### Risk Analyst Dashboard
+---
 
-The frontend provides an AI Risk Manager interface for investigating transactions and viewing:
+# Web Dashboard
 
-* Risk overview
-* Transaction risk
-* Fraud probability
-* Risk score
-* Risk level
-* SHAP explanations
-* Graph intelligence
-* Network risk
-* Cluster information
-* Agent investigation
-* Evidence
-* Investigation conclusion
-* Recommended action
+The frontend is intentionally lightweight and framework-free.
 
-The dashboard is implemented using:
+### Technologies
 
 * HTML
 * CSS
 * Vanilla JavaScript
 
-No frontend framework is required.
+No React, Vue, Angular, Tailwind, Bootstrap or frontend framework is required.
+
+The dashboard provides:
+
+### Risk Overview
+
+* Risk level
+* Risk score
+* Fraud probability
+* Recommended action
+
+### Risk Score Analysis
+
+Visual representation of the risk assessment.
+
+### SHAP Explanation
+
+Displays:
+
+* Risk-increasing features
+* Risk-reducing features
+* Feature impact
+
+### Graph Intelligence
+
+Displays:
+
+* Connected transactions
+* Shared entities
+* Suspicious neighbors
+* Neighborhood information
+
+### Network Risk
+
+Displays:
+
+* Network risk score
+* Combined risk score
+* Network factors
+* Neighbor information
+
+### Cluster Intelligence
+
+Displays:
+
+* Cluster size
+* Entity count
+* Suspicious transaction ratio
+* Strong and weak entity types
+* Shared identifiers
+
+### Agent Investigation
+
+Displays results from:
+
+* Risk Agent
+* Pattern Agent
+* Evidence Agent
+
+### Investigation Report
+
+Provides the final consolidated investigation result.
 
 ---
 
-## Architecture
+# Supabase Integration
+
+Supabase is used for persistent storage of important transaction and prediction information.
+
+The active database schema contains:
+
+* `transactions`
+* `predictions`
+* `risk_factors`
+* `investigations`
+* `investigation_evidence`
+* `detected_patterns`
+* `agent_results`
+* `graph_edges`
+* `entities`
+* `transaction_entities`
+
+The system persists:
+
+* Transactions
+* ML predictions
+* SHAP risk factors and reducers
+
+The investigation layer can fall back to Supabase when transaction information is not available in the in-memory transaction store.
+
+This allows transaction investigations to continue across backend restarts.
+
+> The current graph intelligence layer is maintained in memory and is rebuilt when the backend restarts.
+
+---
+
+# System Architecture
 
 ```text
-RiskPred
+                    ┌─────────────────────┐
+                    │   Web Dashboard     │
+                    │ HTML/CSS/JavaScript │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │      FastAPI        │
+                    │      Backend        │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+       ┌────────────┐   ┌─────────────┐   ┌─────────────┐
+       │ ML Model   │   │   Graph     │   │ Investigation│
+       │  XGBoost   │   │ Intelligence│   │    Agents    │
+       └─────┬──────┘   └──────┬──────┘   └──────┬──────┘
+             │                 │                  │
+             ▼                 ▼                  ▼
+          SHAP            Network Risk       Risk Agent
+                           Cluster           Pattern Agent
+                                             Evidence Agent
+                                                  │
+                                                  ▼
+                                        Investigation Report
+
+                               │
+                               ▼
+                         ┌─────────────┐
+                         │  Supabase   │
+                         │ Persistence │
+                         └─────────────┘
+```
+
+---
+
+# Technology Stack
+
+| Component            | Technology                    |
+| -------------------- | ----------------------------- |
+| Programming Language | Python                        |
+| Backend              | FastAPI                       |
+| ML Model             | XGBoost                       |
+| Explainability       | SHAP                          |
+| Graph Intelligence   | Custom Python Graph Layer     |
+| Agents               | Deterministic Python Agents   |
+| Database             | Supabase                      |
+| Frontend             | HTML, CSS, Vanilla JavaScript |
+| Model Serialization  | Joblib                        |
+| Testing              | Pytest                        |
+
+---
+
+# Project Structure
+
+```text
+RiskPred/
 │
 ├── backend/
 │   ├── app/
 │   │   ├── api/
-│   │   │   └── routes/
-│   │   │       ├── health.py
-│   │   │       ├── predictions.py
-│   │   │       ├── graph.py
-│   │   │       └── investigation.py
-│   │   │
+│   │   ├── core/
+│   │   ├── db/
 │   │   ├── graph/
-│   │   │   ├── entity_extractor.py
-│   │   │   ├── entity_resolver.py
-│   │   │   ├── graph_builder.py
-│   │   │   ├── graph_queries.py
-│   │   │   ├── graph_service.py
-│   │   │   ├── network_risk.py
-│   │   │   └── cluster_detector.py
-│   │   │
 │   │   ├── investigation/
-│   │   │   ├── context.py
-│   │   │   ├── schemas.py
-│   │   │   ├── risk_agent.py
-│   │   │   ├── pattern_agent.py
-│   │   │   ├── evidence_agent.py
-│   │   │   ├── orchestrator.py
-│   │   │   └── report.py
-│   │   │
+│   │   ├── models/
+│   │   ├── schemas/
 │   │   └── services/
-│   │       └── prediction_service.py
+│   │
+│   ├── ml/
+│   │   └── artifacts/
 │   │
 │   └── tests/
 │
@@ -207,345 +484,232 @@ RiskPred
 │       ├── charts.js
 │       └── components.js
 │
+├── supabase/
+│   ├── schema.sql
+│   └── policies.sql
+│
+├── start.bat
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Backend API
+# API Endpoints
 
-The backend is built using FastAPI.
-
-The API prefix is configured by the application's backend settings.
-
-### Prediction
+## Prediction
 
 ```text
 POST /api/v1/predict
 ```
 
-Used to obtain the existing ML-based transaction risk prediction.
+Generates a fraud prediction for a transaction.
 
-### Investigation Context
+---
 
-```text
-GET /api/v1/investigation/{transaction_id}/context
-```
-
-Returns the assembled investigation context for a transaction.
-
-### Investigation Report
+## Investigation
 
 ```text
 GET /api/v1/investigation/{transaction_id}
 ```
 
-Runs the investigation pipeline and returns the structured investigation report.
+Returns the complete investigation report.
 
-### Graph Status
+---
+
+## Investigation Context
 
 ```text
-GET /api/v1/graph/status
+GET /api/v1/investigation/{transaction_id}/context
 ```
 
-Checks graph availability/status.
+Returns the investigation context used by the agents.
 
-### Graph Build
+---
+
+## Graph
 
 ```text
 POST /api/v1/graph/build
-```
 
-Builds the graph using the existing graph service.
+GET /api/v1/graph/status
 
-### Transaction Graph
-
-```text
 GET /api/v1/graph/transaction/{transaction_id}
-```
 
-Retrieves graph information for a transaction.
-
-### Transaction Connections
-
-```text
 GET /api/v1/graph/transaction/{transaction_id}/connections
-```
 
-Retrieves connections associated with a transaction.
-
-### Transaction Neighborhood
-
-```text
 GET /api/v1/graph/transaction/{transaction_id}/neighborhood
-```
 
-Supports neighborhood investigation using the existing graph implementation.
-
-### Transaction Network Risk
-
-```text
 GET /api/v1/graph/transaction/{transaction_id}/risk
-```
 
-Retrieves network-based risk information.
-
-### Clusters
-
-```text
 GET /api/v1/graph/clusters
-```
 
-Retrieves available graph clusters.
-
-### Transaction Cluster
-
-```text
 GET /api/v1/graph/clusters/{transaction_id}
 ```
 
-Retrieves cluster information associated with a transaction.
-
-> API paths and request/response schemas should be treated as defined by the backend implementation.
-
 ---
 
-## Investigation Pipeline
+# Running the Project
 
-The investigation system is designed to preserve the distinction between prediction, graph intelligence, and investigation reasoning.
+## 1. Create and activate the virtual environment
 
-```text
-InvestigationContext
-        │
-        ▼
-InvestigationOrchestrator
-        │
-        ├──────────────┐
-        ▼              ▼
-   Risk Agent     Pattern Agent
-        │              │
-        └──────┬───────┘
-               ▼
-        Evidence Agent
-               │
-               ▼
-      Investigation Report
+Windows PowerShell:
+
+```powershell
+.\venv\Scripts\Activate.ps1
 ```
 
-The agents are deterministic and operate on the information available in the investigation context.
-
-The system does not generate evidence when evidence is unavailable.
-
 ---
 
-## Handling Missing Evidence
+## 2. Install dependencies
 
-Risk investigations may not always have complete information.
-
-RiskPred explicitly represents unavailable information.
-
-Examples include:
-
-```text
-Graph intelligence unavailable
-SHAP explanation unavailable
-Cluster intelligence unavailable
-Network risk unavailable
-```
-
-Similarly, agent failures are preserved in the investigation report.
-
-This prevents the system from presenting fabricated information as investigative evidence.
-
----
-
-## Frontend
-
-The RiskPred dashboard is implemented with:
-
-```text
-HTML
-CSS
-Vanilla JavaScript
-```
-
-Frontend responsibilities are separated into:
-
-### `api.js`
-
-Handles communication with the FastAPI backend.
-
-### `app.js`
-
-Handles application state, user interactions, and dashboard orchestration.
-
-### `components.js`
-
-Contains reusable DOM rendering components.
-
-### `charts.js`
-
-Contains visualizations such as risk and SHAP representations.
-
-The frontend does not reproduce backend fraud-detection or investigation logic.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-* Python 3.10+
-
-### Setup
-
-```bash
-python -m venv venv
-venv\Scripts\activate
+```powershell
 pip install -r requirements.txt
 ```
 
-### Start the Application
+---
 
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
+## 3. Configure environment variables
+
+Create a `.env` file in the project root.
+
+Required Supabase configuration:
+
+```text
+SUPABASE_URL=your_supabase_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 ```
 
-Then open the dashboard:
+Do not commit real Supabase credentials to GitHub.
+
+---
+
+## 4. Start the application
+
+The project includes:
+
+```text
+start.bat
+```
+
+Run:
+
+```powershell
+.\start.bat
+```
+
+The application will start on:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-The dashboard, static assets, and API are all served from the same FastAPI process on port `8000`. No separate frontend server is required.
-
----
-
-## Testing
-
-Backend tests are located under:
+Dashboard:
 
 ```text
-backend/tests/
+http://127.0.0.1:8000/dashboard
 ```
 
-Run the complete test suite with the project's virtual environment activated:
+The FastAPI backend serves the frontend, so the dashboard and API use the same port.
 
-```bash
-pytest -q
+---
+
+# Example Prediction
+
+Example transaction:
+
+```json
+{
+  "transaction_id": "TEST_TXN_001",
+  "merchant_id": "MERCHANT_001",
+  "customer_id": "CUST_1001",
+  "amount": 250.00
+}
 ```
 
-The test suite covers the existing prediction, graph, investigation context, agents, orchestrator, report, and API functionality.
-
----
-
-## Development Principles
-
-RiskPred follows several important development principles:
-
-### 1. Reuse Existing Intelligence
-
-The investigation pipeline reuses the existing prediction and graph services rather than implementing competing logic.
-
-### 2. No Fabricated Evidence
-
-If data is unavailable, the system explicitly reports it as unavailable.
-
-### 3. Deterministic Investigation
-
-The current investigation agents use deterministic rules and existing system outputs.
-
-### 4. Separation of Responsibilities
-
-Machine learning, graph intelligence, investigation agents, API routes, and frontend presentation remain separate concerns.
-
-### 5. Minimal Integration Changes
-
-The dashboard consumes existing backend APIs instead of unnecessarily redesigning the backend.
-
-### 6. Framework-Free Frontend
-
-The current dashboard uses plain HTML, CSS, and vanilla JavaScript.
-
----
-
-## Current Technology Stack
-
-### Backend
-
-* Python
-* FastAPI
-* Pydantic
-* Scikit-learn
-* XGBoost
-* SHAP
-
-### Graph / Investigation
-
-* Graph-based transaction intelligence
-* Network risk analysis
-* Cluster detection
-* Deterministic investigation agents
-
-### Frontend
-
-* HTML5
-* CSS3
-* Vanilla JavaScript
-* SVG/CSS/Canvas-based visualizations where appropriate
-
-### Testing
-
-* Pytest
-
----
-
-## Project Status
-
-The project has progressed through:
+Example response:
 
 ```text
-Sprint 1
-   ↓
-Sprint 2
-   ↓
-Sprint 3 — Graph Intelligence
-   ↓
-Sprint 4 — Investigation Agents
-   ↓
-Sprint 5 — Dashboard + Integration
+Transaction ID: TEST_TXN_001
+Fraud Probability: 18.09%
+Risk Score: 18
+Risk Level: LOW
+Recommended Action: ALLOW
 ```
 
-Sprint 3 and Sprint 4 provide the underlying prediction, graph, investigation-context, agent, orchestration, and report functionality.
-
-Sprint 5 provides the analyst-facing dashboard that integrates these capabilities into a single interface.
+The exact prediction depends on the transaction features supplied to the model.
 
 ---
 
-## Important Limitations
+# Testing
 
-RiskPred intentionally does not fabricate information.
+The project contains regression and component-level tests covering:
 
-If an aggregate transaction dataset or aggregate statistics endpoint is not available, the dashboard does not invent KPI values.
+* Prediction
+* Graph intelligence
+* Investigation context
+* Risk Agent
+* Pattern Agent
+* Evidence Agent
+* Investigation orchestration
+* Investigation reports
+* API routes
+* Supabase persistence
+* Frontend-related integration behavior
 
-Similarly, if graph, SHAP, cluster, or agent information is unavailable, the dashboard displays an appropriate unavailable state.
+Latest complete test verification:
 
-The system should therefore be evaluated using the actual transaction and backend data available in the project.
+```text
+635 passed
+0 failed
+```
+---
+
+# Future Scope
+
+Possible future improvements include:
+
+* Persistent graph storage
+* Real-time transaction streaming
+* Larger-scale graph analytics
+* Advanced anomaly detection
+* Continuous model monitoring
+* Investigator feedback loops
+* More sophisticated agent reasoning
+* Production-grade authentication and authorization
+* Real-time fraud alerts
 
 ---
 
-## Future Extensions
+# Project Vision
 
-Potential future work may include:
+AI Risk Manager aims to move fraud detection from:
 
-* Persistent investigation case storage
-* Merchant-specific dashboards
-* Historical investigation tracking
-* Advanced graph visualization
-* Analyst feedback loops
-* Authentication and role-based access
-* Persistent analytics and reporting
-* Additional fraud detection models
+```text
+Prediction
+```
 
-These are future extensions and are not required for the current Sprint 5 implementation.
+to:
+
+```text
+Prediction
+     ↓
+Explanation
+     ↓
+Connection
+     ↓
+Investigation
+     ↓
+Action
+```
+
+The goal is to help fraud investigators make faster, more explainable and better-informed decisions.
+
+---
+
+## Final Statement
+
+**AI Risk Manager doesn't just predict fraud — it explains, connects, investigates and helps act.**
+
+
